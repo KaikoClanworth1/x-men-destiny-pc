@@ -1,0 +1,51 @@
+X-Men: Destiny PC port
+Copyright (c) 2026 KaikoClanworth and the X-Men: Destiny PC port contributors
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+What this licence covers
+------------------------
+
+It covers the port's own work in this repository: the game hooks, menus, mod
+menu and native renderer (port/src), the tools (port/tools) and the
+documentation.
+
+It does NOT cover:
+
+- The patches in port/patches. They modify other projects and are under the
+  licences of the projects they patch: the ReXGlue SDK (BSD-3-Clause, partly
+  derived from Xenia), plume (MIT) and XenosRecomp (MIT).
+- The game itself. No game files, game code, art, audio or video from
+  X-Men: Destiny are in this repository, and none are licensed by it. You
+  need your own legally obtained copy of the game. X-Men and all related
+  names and characters are trademarks of Marvel; Activision published and
+  Silicon Knights developed the original game. This project is not affiliated
+  with or endorsed by any of them, or by Microsoft.
+
+
+Credit
+------
+
+The licence above already requires keeping the copyright notice. If you use
+or adapt this work in another project (for example another game port), please
+also say so where your players can see it, for example: "Parts adapted from
+the X-Men: Destiny PC port by KaikoClanworth."

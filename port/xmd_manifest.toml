@@ -1,0 +1,11 @@
+# X-Men: Destiny (Xbox 360) - ReXGlue project manifest.
+
+[project]
+name = "xmd"
+sdk_version = "0.10.0"
+game_root = "../Game Files"
+
+[entrypoint]
+file_path = "../Game Files/Default.xex"
+out_directory_path = "generated/default"
+includes = ["xmd_config.toml"]

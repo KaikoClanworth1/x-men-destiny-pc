@@ -1,0 +1,215 @@
+# From boot into the first level: the title route, New Game with every default, cut-scenes skipped.
+# (Ends in the level; START there opens the pause menu, so the last presses are A only.)
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil A MainMenuIntroActivated
+wait 5000
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2000
+press START 200
+wait 2000
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+# In the level: close the tutorial box, walk forward.
+wait 2500
+press BACK 200
+wait 2500
+press BACK 200
+wait 3000
+stick L 0 32000 2500
+wait 4000

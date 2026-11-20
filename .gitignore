@@ -1,0 +1,50 @@
+# ── Allow-list: only the port's own files are in this repository. ──
+# Game data (disc image, extracted files, installs, saves) and the
+# recompiled game code never are: players supply their own disc.
+/*
+!/.gitignore
+!/.gitattributes
+!/.github/
+!/README.md
+!/LICENSE
+!/recomplauncher.json
+!/docs/
+!/port/
+
+# Inside port/: generated game code, builds, installers, test runs, captures
+/port/generated/
+/port/out/
+/port/runs/
+/port/installer/
+/port/screenshots/
+/port/res/*
+!/port/res/xmd.rc
+!/port/res/README.md
+/port/tools/__pycache__/
+
+# Never, wherever they are: game files and built programs
+*.xex
+*.iso
+*.xiso
+*.zzz
+*.gz
+*.bnk
+*.xma
+*.usm
+*.gfx
+*.swf
+*.xsc
+*.exe
+*.dll
+*.pdb
+*.bin
+*.ico
+*.log
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+.idea/
+.claude/
+Thumbs.db
+.DS_Store

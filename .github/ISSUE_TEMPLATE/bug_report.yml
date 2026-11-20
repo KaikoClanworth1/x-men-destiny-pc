@@ -1,0 +1,94 @@
+name: Problem report
+description: "Something in the port is wrong: a crash, a picture or sound fault, a control that does not work."
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Two things make a fault findable: an **F4 capture** and the **problem log**.
+
+        **F4 capture.** While the fault is on screen, press **F4**. The port writes a folder
+        `UserData\captures\capture_<date>_<time>\` beside `xmd.exe`. Attach these files from it (drag them into the box below):
+        `screenshot.png`, `info.txt`, `problems.txt`, `log_tail.txt`, `resume.txt`.
+
+        **Do not attach the `state` folder or `draws.txt`.** `state\memory.bin` is a copy of the running game's memory:
+        it holds the game's own data, which must not be posted here. `draws.txt` is too large for GitHub.
+
+        **Problem log.** `UserData\logs\problems.log`. After a crash, also the newest file in `UserData\crashes\`.
+
+        Logs can show your Windows user name inside folder paths. Look through them, and replace it if you want it kept private.
+
+        Never attach game files, disc images or saves from other people.
+  - type: dropdown
+    id: area
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - Picture (wrong colours, missing things, flicker, pop-in)
+        - Sound (missing, crackle, wrong volume)
+        - Controls (controller, keyboard, mouse, rumble)
+        - Menus and settings (Options, Graphics, Exit)
+        - Mod menu (F1)
+        - Crash, freeze or will not start
+        - Speed (stutter, low frame rate)
+        - Installing or building
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Where in the game (mission, cut-scene, menu page), and what you did just before.
+    validations:
+      required: true
+  - type: textarea
+    id: repeat
+    attributes:
+      label: Can you make it happen again? How?
+      placeholder: "Every time / sometimes / once. Steps: 1. ... 2. ..."
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Port version or build date
+      description: The first lines of `info.txt` in an F4 capture say it.
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: Your PC
+      placeholder: "Windows 11, Ryzen 5 5600, RTX 3060 (driver 566.14), 16 GB"
+    validations:
+      required: true
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Renderer
+      options:
+        - I don't know
+        - Native, Direct3D 12
+        - Native, Direct3D 11
+        - Native, Vulkan
+        - Emulated (the fallback)
+  - type: input
+    id: input
+    attributes:
+      label: Controller or keyboard
+      placeholder: "Xbox Series pad over USB / DualSense over Bluetooth / keyboard and mouse"
+  - type: textarea
+    id: files
+    attributes:
+      label: F4 capture files and problem log
+      description: "Drag in: screenshot.png, info.txt, problems.txt, log_tail.txt, resume.txt, problems.log, and the crash file if there is one. Not the state folder."
+    validations:
+      required: true
+  - type: checkboxes
+    id: own
+    attributes:
+      label: Before you send
+      options:
+        - label: I use my own copy of the game, and I attached no game files and no `state` folder.
+          required: true

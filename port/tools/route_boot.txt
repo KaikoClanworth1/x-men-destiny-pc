@@ -1,0 +1,7 @@
+# From boot to the main menu - where a recorded session (tools\record_play.ps1, runs\recorded_pad.txt)
+# starts; to_level.ps1 -Recorded plays this and then the recording (which waits at each screen: "sync" lines).
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil A MainMenuIntroActivated

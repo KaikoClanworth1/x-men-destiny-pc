@@ -1,0 +1,9 @@
+# From boot to the main menu (append to runs\input.txt after run_test.ps1 -Pad -Keep;
+# needs krnl = "trace" in runs\test_config.toml for the XMP sync lines).
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil A MainMenuIntroActivated
+wait 5000
+press A 200

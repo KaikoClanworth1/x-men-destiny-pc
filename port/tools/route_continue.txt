@@ -1,0 +1,14 @@
+# From boot to the main menu's Continue (tools\resume.ps1 - needs a saved game in the test profile: without one
+# Continue is greyed out and DOWN lands on Options). The menu first shows the "do not turn off the console"
+# notice: A closes it.
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil A MainMenuIntroActivated
+wait 5000
+press A 200
+wait 3000
+press DOWN 300
+wait 1500
+press A 300

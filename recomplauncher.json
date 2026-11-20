@@ -1,0 +1,45 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "X-Men: Destiny PC Port",
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your X-Men: Destiny game for Xbox 360: a disc image (.iso), or the folder that holds its files (Default.xex).",
+      "role": "game",
+      "formats": [
+        { "type": "file", "extensions": ["iso"] },
+        { "type": "folder" }
+      ]
+    }
+  ],
+  "prepare": {
+    "program": ["XMDSetup.exe"],
+    "args": ["--prepare", "--game={input:game}", "--install={install}"],
+    "label": "Installing the game data and building the game on your PC (needs Microsoft's free Build Tools for Visual Studio 2026 with Desktop development with C++ and C++ Clang Compiler for Windows)",
+    "timeout": 21600,
+    "done": ["{install}/xmd.exe"]
+  },
+  "start": {
+    "program": ["xmd.exe"]
+  },
+  "saves": ["{install}/UserData"],
+  "folders": {
+    "saves": [{ "path": "{install}/UserData" }],
+    "logs": [{ "path": "{install}/UserData/logs" }],
+    "captures": [{ "path": "{install}/UserData/captures" }],
+    "crashes": [{ "path": "{install}/UserData/crashes" }]
+  },
+  "exit_codes": {
+    "2": "The setup didn't get your game, or it isn't the version of X-Men: Destiny (Xbox 360) this port supports. Pick your disc image or game folder again on the game's page.",
+    "3": "The game is built on your PC with Microsoft's free Build Tools for Visual Studio 2026 (Desktop development with C++, and C++ Clang Compiler for Windows), and the setup could not install them. Allow Windows' admin prompt and Microsoft's installer window when the setup opens them, or install them from visualstudio.microsoft.com, then run the setup again.",
+    "4": "Installing or building the game failed. The details are in setup.log, in the UserData\\logs folder of the game."
+  },
+  "looks": {
+    "graphics": "d3d12"
+  },
+  "actions": [
+    { "id": "saves", "label": "Saves and settings", "help": "Your saves, settings, captures and logs.", "open": "saves" },
+    { "id": "captures", "label": "Captures", "help": "Folders made with F4, for problem reports.", "open": "captures" }
+  ]
+}

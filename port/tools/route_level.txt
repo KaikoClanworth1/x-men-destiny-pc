@@ -1,0 +1,27 @@
+# From boot into the first level with the HUD up, in step with the game (its menu callbacks in the log:
+# "flash call: NAME" lines, src\lua_debug.cpp) - loading and cut-scene times differ from run to run.
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil START (00000000, 00000000)
+wait 1500
+pressuntil A MainMenuIntroActivated
+wait 5000
+press A 200
+wait 2500
+press A 200
+wait 2500
+press A 200
+pressuntil A OnCharacterSelection
+wait 2000
+press A 200
+# (the opening cut-scenes: START skips one where it can)
+pressuntil START/A IntroComplete
+wait 4000
+press A 200
+pressuntil START/A ShowHudComplete
+# (in the level: the tutorial box closes with BACK)
+wait 3000
+press BACK 200
+wait 2500
+press BACK 200
+wait 2000
