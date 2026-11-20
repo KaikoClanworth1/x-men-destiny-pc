@@ -36,5 +36,9 @@ const char* FixLabel(const Toolchain& t);
 // The environment vcvars64.bat sets up (PATH, INCLUDE, LIB, ...), as a CreateProcess block.
 bool CaptureEnvironment(const fs::path& vcvars, std::vector<wchar_t>& block);
 std::wstring EnvValue(const std::vector<wchar_t>& block, const wchar_t* name);
+// The same environment with `dir` first on PATH.
+std::vector<wchar_t> WithPathFirst(const std::vector<wchar_t>& block, const fs::path& dir);
+// The same environment with one variable set.
+std::vector<wchar_t> WithVar(const std::vector<wchar_t>& block, const std::wstring& name, const std::wstring& value);
 
 } // namespace toolchain

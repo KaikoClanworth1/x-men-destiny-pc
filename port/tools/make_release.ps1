@@ -14,6 +14,7 @@ param(
     [switch]$Clean,           # a release: copy the sources to -CleanRoot and build there, so no binary names this folder
     [string]$CleanRoot = "",  # default <this drive>:\xmdrel
     [int]$Jobs = 12,
+    [string]$Python = "",     # a python.org Python install, copied (in part) as the shader tools' runtime
     [switch]$AllowPaths       # a test package: do not fail when binaries hold this PC's build paths
 )
 $ErrorActionPreference = "Stop"
@@ -142,6 +143,25 @@ foreach ($l in "rexruntime.lib", "spdlog.lib", "fmt.lib", "SDL3-static.lib") { C
 Copy-Item (Join-Path $Build "plume\plume.lib") (Join-Path $out "sdk\lib")
 foreach ($b in "rexruntime.dll", "rexgpu-xenos.dll", "rexffmpeg.dll", "rexmspack.dll", "rexglue.exe") { Copy-Item (Join-Path $sdkOut $b) (Join-Path $out "sdk\bin") }
 Copy-Item (Join-Path $port "xmd_config.toml") (Join-Path $out "sdk\codegen")
+# the shader tools: the port's own scripts and shaders, the converter and DXC, laid out as the scripts expect
+# their project folder (setup\tools\prepare_shaders.py), and a small Python to run them
+$st = Join-Path $out "sdk\shadertools"
+$xr = Join-Path $root "recomp\XenosRecomp"
+foreach ($d in 'port\tools', 'port\src\native\shaders', 'recomp\XenosRecomp\build\XenosRecomp', 'recomp\XenosRecomp\XenosRecomp',
+               'recomp\XenosRecomp\thirdparty\dxc-bin\bin\x64') { New-Item -ItemType Directory -Force (Join-Path $st $d) | Out-Null }
+Copy-Item (Join-Path $port "setup\tools\prepare_shaders.py") $st
+foreach ($f in "find_shaders.py", "convert_shaders.py") { Copy-Item (Join-Path $srcRoot "port\tools\$f") (Join-Path $st "port\tools") }
+Copy-Item (Join-Path $srcRoot "port\src\native\shaders\*.hlsl*") (Join-Path $st "port\src\native\shaders")
+Copy-Item (Join-Path $xr "build\XenosRecomp\XenosRecomp.exe") (Join-Path $st "recomp\XenosRecomp\build\XenosRecomp")
+Copy-Item (Join-Path $xr "XenosRecomp\shader_common.h") (Join-Path $st "recomp\XenosRecomp\XenosRecomp")
+foreach ($f in "dxc.exe", "dxcompiler.dll", "dxil.dll") { Copy-Item (Join-Path $xr "thirdparty\dxc-bin\bin\x64\$f") (Join-Path $st "recomp\XenosRecomp\thirdparty\dxc-bin\bin\x64") }
+if (-not $Python) {   # a python.org install (the Microsoft Store one cannot be copied)
+    $Python = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Programs\Python"), $env:ProgramFiles -Directory -Filter "Python3*" -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path (Join-Path $_.FullName "LICENSE.txt") } | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $Python -or -not (Test-Path (Join-Path $Python "python.exe"))) { throw "no python.org Python found for the shader tools' runtime (-Python <its folder>)" }
+& (Join-Path $Python "python.exe") (Join-Path $port "setup\tools\make_python_runtime.py") (Join-Path $st "python")
+if ($LASTEXITCODE) { throw "make_python_runtime.py failed" }
 # the version of Default.xex the port was made for: its SHA-1 only
 $xex = Join-Path $root "Game Files\Default.xex"
 $sha = (Get-FileHash $xex -Algorithm SHA1).Hash.ToLower()
@@ -168,6 +188,9 @@ $lic = [ordered]@{
     "SIMDe (MIT)"                                    = (Join-Path $sdkSrc "thirdparty\simde\COPYING")
     "FFmpeg (LGPL-2.1-or-later; rexffmpeg.dll)"      = (Join-Path $sdkSrc "thirdparty\FFmpeg\COPYING.LGPLv2.1")
     "libmspack (LGPL-2.1; rexmspack.dll)"            = (Join-Path $sdkSrc "thirdparty\libmspack\libmspack\COPYING.LIB")
+    "XenosRecomp (MIT; the shader converter)"        = (Join-Path $root "recomp\XenosRecomp\LICENSE.md")
+    "DirectX Shader Compiler (NCSA / LLVM; dxc.exe, dxcompiler.dll, dxil.dll by Microsoft)" = (Join-Path $port "setup\licenses\DirectXShaderCompiler.txt")   # (its text is not in the dxc-bin folder: kept beside the setup's sources)
+    "Python (PSF licence; sdk\shadertools\python)"   = (Join-Path $st "python\LICENSE.txt")
 }
 $notice = @("X-Men Destiny PC port - third-party software in this package", "", "The full licence texts are in the licenses folder.", "")
 foreach ($k in $lic.Keys) {
@@ -192,8 +215,9 @@ This package contains no part of the game.
    "Desktop development with C++", with the component "C++ Clang Compiler for Windows"). If you don't have
    them, the setup offers to install them for you.
 3. Run XMDSetup.exe. It finds your game (or Browse / drop it on the window), asks where to install and shows
-   the space needed. Press "Build the game": it copies the game's files, translates and compiles the game
-   (about 10-20 minutes; your PC stays usable).
+   the space needed. Press "Build the game": it copies the game's files, translates and compiles the game and
+   prepares its shaders (about 20-40 minutes; your PC stays usable). Near the end the game is started once
+   by itself for under a minute, silent and out of sight, to collect a few shaders it makes as it starts.
 4. Choose a desktop shortcut and a Start-menu entry, then Play. Settings are in the game (Options > Graphics).
    Run the launcher again, or use Windows Settings > Apps, to update, repair or uninstall. Uninstalling keeps
    your saves unless you say otherwise.

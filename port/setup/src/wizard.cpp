@@ -256,6 +256,9 @@ struct App {
     std::vector<std::string> left_behind;
     std::string message; // a line under the launcher's buttons
     updater::Updater update;
+    // shaders the game saved while it ran, converted before it starts again
+    std::thread shader_thread;
+    std::atomic<bool> adding_shaders{false}, shaders_added{false};
 
     bool quit = false;
     bool auto_run = false;
@@ -265,7 +268,7 @@ App* g_app = nullptr;
 void JoinAll(App& a) {
     a.scan_cancel = true;
     a.progress.cancel = true;
-    for (std::thread* t : {&a.scan_thread, &a.tools_thread, &a.build_thread})
+    for (std::thread* t : {&a.scan_thread, &a.tools_thread, &a.build_thread, &a.shader_thread})
         if (t->joinable())
             t->join();
 }
@@ -633,7 +636,7 @@ void BottomFiles(App& a) {
     if (!reason.empty())
         TextColored(kAmber, reason);
     else
-        TextColored(kDim, "About 10 to 20 minutes on most PCs");
+        TextColored(kDim, "About 20 to 40 minutes on most PCs");
     ImGui::EndGroup();
     const char* label = a.repair ? "Update the game" : "Build the game";
     const ImVec2 size(S(190), S(42));
@@ -681,7 +684,7 @@ void PageBuild(App& a) {
     else if (overall > 0.05f && elapsed > 20)
         TextColored(kDim, Minutes(elapsed / overall - elapsed) + " left  \xC2\xB7  your PC stays usable");
     else
-        TextColored(kDim, "Usually 10 to 20 minutes  \xC2\xB7  your PC stays usable");
+        TextColored(kDim, "Usually 20 to 40 minutes  \xC2\xB7  your PC stays usable");
     ImGui::Dummy(ImVec2(0, S(10)));
 
     Ring(overall, S(74), Format("%d%%", int(overall * 100)));
@@ -694,6 +697,8 @@ void PageBuild(App& a) {
         if (active || (failed && i == step)) {
             if (i == builder::kRead && pr.bytes_total)
                 line += "  \xC2\xB7  " + util::Gb(pr.bytes_done) + " of " + util::Gb(pr.bytes_total);
+            if (i == builder::kShaders && pr.shaders_total)
+                line += Format("  \xC2\xB7  %d / %d", pr.shaders_done.load(), pr.shaders_total.load());
             if (i == builder::kCompile && pr.total)
                 line += Format("  \xC2\xB7  %d / %d", pr.done.load(), pr.total.load());
         }
@@ -804,6 +809,31 @@ void Play(App& a) {
     }
 }
 
+// Play: first the shaders the game saved the last time it ran (a few seconds), then the game.
+void RequestPlay(App& a) {
+    if (a.adding_shaders)
+        return;
+    if (builder::SavedShaderCount(a.installed.dir) == 0 || !a.sdk.problem.empty()) {
+        Play(a);
+        return;
+    }
+    if (a.shader_thread.joinable())
+        a.shader_thread.join();
+    a.adding_shaders = true;
+    a.shaders_added = false;
+    a.progress.cancel = false;
+    builder::Paths p;
+    p.sdk_dir = a.sdk_dir;
+    p.install_dir = a.installed.dir;
+    p.work_dir = a.installed.build_dir.empty() ? a.build_dir : a.installed.build_dir;
+    const int jobs = Jobs(a);
+    a.shader_thread = std::thread([&a, p, jobs] {
+        std::string why;
+        builder::AddSavedShaders(p, jobs, a.progress, why); // (a failure is logged; the game starts all the same)
+        a.shaders_added = true;
+    });
+}
+
 void PageDone(App& a) {
     ImGui::PushFont(g_bold, S(26));
     ImGui::TextUnformatted("Ready to play");
@@ -825,6 +855,8 @@ void PageDone(App& a) {
         ImGui::PopTextWrapPos();
     }
     EndPanel();
+    if (const std::string w = a.progress.GetWarning(); !w.empty())
+        TextColored(kAmber, w);
     if (!a.message.empty())
         TextColored(kRed, a.message);
 }
@@ -840,7 +872,7 @@ void BottomDone(App& a) {
     if (Button("Play", true, true, size)) {
         Finish(a);
         if (a.message.empty())
-            Play(a);
+            RequestPlay(a);
     }
 }
 
@@ -936,7 +968,15 @@ void PageInstalled(App& a) {
 
     std::error_code ec;
     const bool playable = fs::exists(a.installed.dir / "xmd.exe", ec);
-    BigButton("Play", playable ? "Start the game" : "The game is not built yet: use Update or repair", true, [&] { Play(a); }, playable);
+    if (a.shaders_added.exchange(false)) {
+        if (a.shader_thread.joinable())
+            a.shader_thread.join();
+        a.adding_shaders = false;
+        Play(a);
+    }
+    BigButton("Play", a.adding_shaders ? "Preparing the shaders the game made last time..."
+                      : playable ? "Start the game" : "The game is not built yet: use Update or repair",
+              true, [&] { RequestPlay(a); }, playable && !a.adding_shaders);
     BigButton("Update or repair", "Build the game again from the files already installed. Saves and settings stay.", false, [&] { StartRepair(a); });
     BigButton("Saves and settings", "Open the folder with your saves, settings, captures and logs", false, [&] {
         fs::create_directories(a.installed.dir / "UserData", ec);

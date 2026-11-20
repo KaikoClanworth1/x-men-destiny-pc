@@ -300,6 +300,41 @@ bool CaptureEnvironment(const fs::path& vcvars, std::vector<wchar_t>& block) {
     return tools;
 }
 
+std::vector<wchar_t> WithPathFirst(const std::vector<wchar_t>& block, const fs::path& dir) {
+    std::vector<wchar_t> out;
+    bool had = false;
+    for (const wchar_t* e = block.data(); *e; e += wcslen(e) + 1) {
+        std::wstring line = e;
+        if (_wcsnicmp(e, L"PATH=", 5) == 0) {
+            line = L"PATH=" + dir.wstring() + L";" + line.substr(5);
+            had = true;
+        }
+        out.insert(out.end(), line.begin(), line.end());
+        out.push_back(0);
+    }
+    if (!had) {
+        const std::wstring line = L"PATH=" + dir.wstring();
+        out.insert(out.end(), line.begin(), line.end());
+        out.push_back(0);
+    }
+    out.push_back(0);
+    return out;
+}
+
+std::vector<wchar_t> WithVar(const std::vector<wchar_t>& block, const std::wstring& name, const std::wstring& value) {
+    std::vector<wchar_t> out;
+    for (const wchar_t* e = block.data(); *e; e += wcslen(e) + 1) {
+        if (_wcsnicmp(e, name.c_str(), name.size()) == 0 && e[name.size()] == L'=')
+            continue;
+        out.insert(out.end(), e, e + wcslen(e) + 1);
+    }
+    const std::wstring line = name + L"=" + value;
+    out.insert(out.end(), line.begin(), line.end());
+    out.push_back(0);
+    out.push_back(0);
+    return out;
+}
+
 std::wstring EnvValue(const std::vector<wchar_t>& block, const wchar_t* name) {
     const size_t n = wcslen(name);
     for (const wchar_t* e = block.data(); *e; e += wcslen(e) + 1)

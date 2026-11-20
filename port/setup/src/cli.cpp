@@ -60,6 +60,7 @@ int Prepare(const Args& args) {
     p.install_dir = args.Get("install").empty() ? util::SetupDir() / "game" : fs::absolute(fs::path(util::Wide(args.Get("install"))));
     p.work_dir = args.Get("work").empty() ? setup::DefaultBuildDir() : fs::absolute(fs::path(util::Wide(args.Get("work"))));
     p.source = fs::path(util::Wide(game));
+    p.shaders = !args.Has("no-shaders");
     std::error_code ec;
     fs::create_directories(p.install_dir / "UserData" / "logs", ec);
     util::SetLogFile(p.install_dir / "UserData" / "logs" / "setup.log");
@@ -126,6 +127,8 @@ int Prepare(const Args& args) {
     in.version = sdk.version;
     in.by_launcher = true;
     setup::SaveInstalled(in);
+    if (const std::string w = prog.GetWarning(); !w.empty())
+        Out("note " + w);
     Out("progress 1.000 Ready to play");
     return 0;
 }

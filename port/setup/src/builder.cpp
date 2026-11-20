@@ -20,8 +20,8 @@ using util::Run;
 using util::Utf8;
 
 const char* const kStepNames[kStepCount] = {"Read your game files", "Translate the game to PC code", "Compile",
-                                            "Put the game together", "Finish up"};
-const float kStepWeights[kStepCount] = {0.22f, 0.08f, 0.62f, 0.06f, 0.02f};
+                                            "Put the game together", "Prepare the shaders"};
+const float kStepWeights[kStepCount] = {0.20f, 0.06f, 0.44f, 0.05f, 0.25f};
 
 namespace {
 
@@ -221,6 +221,10 @@ std::string Progress::GetError() {
     std::lock_guard lk(mutex);
     return error;
 }
+std::string Progress::GetWarning() {
+    std::lock_guard lk(mutex);
+    return warning;
+}
 std::vector<std::string> Progress::Tail(size_t n) {
     std::lock_guard lk(mutex);
     return {log.end() - std::min(n, log.size()), log.end()};
@@ -244,6 +248,183 @@ int DefaultJobs() {
 }
 
 // --------------------------------------------------------------------------------------------------------- build
+
+fs::path SavedShadersDir(const fs::path& install_dir) { return install_dir / "UserData" / "cache" / "shaders_new"; }
+
+namespace {
+
+// Runs the release's shader tool (sdk\shadertools\prepare_shaders.py with the Python packed beside it): finds the
+// game's shaders, converts them, writes the packs into <install>\native_shaders. Shaders the running game saved
+// (SavedShadersDir) are added. Returns why it failed, or nothing.
+std::string RunShaderTool(const Paths& p, int jobs, Progress& prog, const std::vector<wchar_t>& env, float from = 0.0f, float to = 1.0f) {
+    std::error_code ec;
+    const fs::path tools = p.sdk_dir / "shadertools";
+    const fs::path work = p.work_dir / "shaders";
+    // the tools' environment: the C++ tools' when there are any (fxc is in their Windows SDK), with the game folder
+    // first on PATH (Microsoft's C++ runtime, which the converter needs, is there)
+    const std::vector<wchar_t> tool_env = toolchain::WithPathFirst(env, p.install_dir);
+    const fs::path slog = p.work_dir / "shaders.log";
+    fs::create_directories(p.work_dir, ec);
+    fs::remove(slog, ec);
+    std::atomic<bool> watching{true};
+    std::thread watch([&] { // the tool's last "progress <step> <done> <total>" line
+        while (watching) {
+            const std::string text = util::ReadText(slog);
+            const size_t at = text.rfind("progress ");
+            char step[32] = "";
+            int done = 0, total = 0;
+            if (at != std::string::npos && std::sscanf(text.c_str() + at, "progress %31s %d %d", step, &done, &total) == 3 && total > 0) {
+                const float f = float(done) / float(total);
+                const bool find = std::string(step) == "find";
+                prog.fraction = from + (to - from) * (find ? 0.12f * f : 0.12f + 0.86f * f);
+                prog.shaders_done = find ? 0 : done;
+                prog.shaders_total = find ? 0 : total;
+            }
+            Sleep(300);
+        }
+    });
+    std::wstring cmd = Quote(tools / "python" / "python.exe") + L" -I " + Quote(tools / "prepare_shaders.py") + L" " +
+                       Quote(p.install_dir) + L" " + Quote(work) + L" " + Quote(p.install_dir / "native_shaders") +
+                       L" --jobs=" + std::to_wstring(std::max(1, jobs));
+    if (fs::exists(SavedShadersDir(p.install_dir), ec))
+        cmd += L" " + Quote(L"--extra=" + SavedShadersDir(p.install_dir).wstring());
+    const int rc = Run(cmd, &tool_env, slog, BELOW_NORMAL_PRIORITY_CLASS, &prog.cancel, nullptr, tools);
+    watching = false;
+    watch.join();
+    if (prog.cancel)
+        return "Cancelled.";
+    if (rc == 0)
+        return {};
+    std::string why = Format("the converter stopped with code %d", rc);
+    const std::string text = util::ReadText(slog);
+    if (const size_t at = text.rfind("error "); at != std::string::npos)
+        why = text.substr(at + 6, text.find_first_of("\r\n", at) - at - 6);
+    return why + "; see " + Utf8(slog);
+}
+
+// One start of the built game that nobody sees or hears, the way the port's own tests run it: sound off, the window
+// minimised without taking the keyboard and moved below every screen, low priority, no input. The game saves the
+// shaders it compiles (the port's renderer does that whenever it has no converted one). It is ended when no new
+// one came for 20 seconds (they are all made as it starts), when XMD_COLLECT_SHADERS makes it end itself, or
+// after three minutes. Returns how many shaders are waiting to be converted.
+std::vector<wchar_t> CurrentEnvironment();
+
+int CollectStartupShaders(const Paths& p, Progress& prog, const std::vector<wchar_t>& env) {
+    std::error_code ec;
+    const fs::path exe = p.install_dir / "xmd.exe";
+    // (this program's own environment, as when the player starts the game - not the C++ tools')
+    (void)env;
+    std::vector<wchar_t> e = CurrentEnvironment();
+    // (XMD_AFFINITY: every CPU, said outright as the port's tests do)
+    DWORD_PTR process_mask = 0, system_mask = 0;
+    GetProcessAffinityMask(GetCurrentProcess(), &process_mask, &system_mask);
+    wchar_t mask[32];
+    swprintf(mask, 32, L"%llX", static_cast<unsigned long long>(system_mask ? system_mask : 0xFFFF));
+    e = toolchain::WithVar(e, L"XMD_AFFINITY", mask);
+    for (const auto& [name, value] : {std::pair{L"XMD_COLLECT_SHADERS", L"1"}, std::pair{L"XMD_AUDIO_MUTE", L"1"},
+                                      std::pair{L"SVR2011_WINDOW_BEHIND", L"1"}, std::pair{L"SDL_WINDOW_ACTIVATE_WHEN_SHOWN", L"0"},
+                                      std::pair{L"SDL_WINDOW_ACTIVATE_WHEN_RAISED", L"0"}})
+        e = toolchain::WithVar(e, name, value);
+    // (its own settings file and log, so the player's are not made by this start)
+    e = toolchain::WithVar(e, L"XMD_CONFIG", (p.work_dir / "collect_config.toml").wstring());
+    std::wstring cmd = Quote(exe) + L" --log_file=" + Quote(p.work_dir / "collect.log") +
+                       L" --log_level=info --audio_mute=true --fullscreen=false --mnk_mode=false --vsync=false"
+                       L" --d3d12_allow_variable_refresh_rate_and_tearing=false --native_renderer=main --gpu_backend=d3d12";
+    STARTUPINFOW si{sizeof(si)};
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWMINNOACTIVE;
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, BELOW_NORMAL_PRIORITY_CLASS | CREATE_UNICODE_ENVIRONMENT,
+                        e.data(), p.install_dir.c_str(), &si, &pi)) {
+        prog.Log(Format("the game could not be started (error %lu)", GetLastError()));
+        return 0;
+    }
+    CloseHandle(pi.hThread);
+    struct Park {
+        DWORD pid;
+        static BOOL CALLBACK Each(HWND w, LPARAM self) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(w, &pid);
+            if (pid == reinterpret_cast<Park*>(self)->pid && GetWindow(w, GW_OWNER) == nullptr) {
+                const int left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                const int bottom = GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                SetWindowPos(w, HWND_BOTTOM, left + 40, bottom + 200, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            return TRUE;
+        }
+    } park{pi.dwProcessId};
+    const auto start = std::chrono::steady_clock::now();
+    auto last_new = start;
+    int count = SavedShaderCount(p.install_dir);
+    const int before = count;
+    while (WaitForSingleObject(pi.hProcess, 250) == WAIT_TIMEOUT) {
+        const auto now = std::chrono::steady_clock::now();
+        const double secs = std::chrono::duration<double>(now - start).count();
+        if (secs < 60)
+            EnumWindows(&Park::Each, reinterpret_cast<LPARAM>(&park)); // (its windows appear over the first seconds)
+        const int n = SavedShaderCount(p.install_dir);
+        if (n != count)
+            count = n, last_new = now;
+        const double quiet = std::chrono::duration<double>(now - last_new).count();
+        prog.fraction = 0.86f + 0.07f * float(std::min(1.0, secs / 60.0));
+        if (prog.cancel || secs > 180 || (count > before && quiet > 20) || (count == before && secs > 90)) {
+            TerminateProcess(pi.hProcess, 0);
+            WaitForSingleObject(pi.hProcess, 10000);
+            break;
+        }
+    }
+    CloseHandle(pi.hProcess);
+    fs::remove(p.work_dir / "collect_config.toml", ec);
+    return SavedShaderCount(p.install_dir);
+}
+
+std::vector<wchar_t> CurrentEnvironment() {
+    std::vector<wchar_t> block;
+    if (wchar_t* e = GetEnvironmentStringsW()) {
+        const wchar_t* end = e;
+        while (*end)
+            end += wcslen(end) + 1;
+        block.assign(static_cast<const wchar_t*>(e), end + 1);
+        FreeEnvironmentStringsW(e);
+    } else {
+        block.assign(2, 0);
+    }
+    return block;
+}
+
+} // namespace
+
+int SavedShaderCount(const fs::path& install_dir) {
+    int n = 0;
+    std::error_code ec;
+    for (auto& e : fs::directory_iterator(SavedShadersDir(install_dir), ec))
+        if (util::Lower(Utf8(e.path().extension())) == ".xsc")
+            n++;
+    return n;
+}
+
+bool AddSavedShaders(const Paths& p, int jobs, Progress& prog, std::string& why) {
+    prog.running = true;
+    prog.finished = false;
+    prog.ok = false;
+    prog.step = kShaders;
+    prog.fraction = 0;
+    std::error_code ec;
+    if (!fs::exists(p.sdk_dir / "shadertools" / "prepare_shaders.py", ec) || !fs::exists(p.sdk_dir / "shadertools" / "python" / "python.exe", ec)) {
+        why = "the setup package this game was built with is gone";
+    } else {
+        std::vector<wchar_t> env;
+        const toolchain::Toolchain tc = toolchain::Find(0);
+        if (!tc.ok || !toolchain::CaptureEnvironment(tc.vcvars, env))
+            env = CurrentEnvironment(); // (no C++ tools any more: everything but Direct3D 11's shaders still converts)
+        why = RunShaderTool(p, jobs, prog, env);
+    }
+    prog.Log(why.empty() ? "saved shaders added" : "saved shaders: " + why);
+    prog.ok = why.empty();
+    prog.running = false;
+    prog.finished = true;
+    return why.empty();
+}
 
 int BuildGame(const Paths& p, int jobs, Progress& prog) {
     prog.running = true;
@@ -577,13 +758,71 @@ int BuildGame(const Paths& p, int jobs, Progress& prog) {
     fs::remove(out_exe, ec);
     fs::remove(p.work_dir / "xmd.pdb", ec);
 
-    // ---- 5. what the game needs beside it
-    stage(kShaders);
+    // what the game needs beside it
     for (auto& e : fs::directory_iterator(p.sdk_dir / "bin", ec))
         if (e.is_regular_file(ec) && util::Lower(Utf8(e.path().extension())) == ".dll" && !put(e.path(), e.path().filename()))
             return fail(4, "Could not write " + Utf8(e.path().filename()) + " into the game folder.");
     copy_crt(p.install_dir);
     fs::create_directories(p.install_dir / "UserData", ec);
+    prog.fraction = 1.0f;
+
+    // ---- 5. the native renderer's shaders, converted from the game's own (the release's sdk\shadertools: the
+    // port's converter scripts, run by the Python packed with them). Not fatal: without them the game draws with
+    // its compatibility renderer, and a repair tries again.
+    stage(kShaders);
+    {
+        std::lock_guard lk(prog.mutex);
+        prog.warning.clear();
+    }
+    const fs::path tools = p.sdk_dir / "shadertools";
+    const fs::path shader_work = p.work_dir / "shaders";
+    const fs::path shader_out = p.install_dir / "native_shaders";
+    const fs::path shader_stamp = p.work_dir / "shaders.ok";
+    const std::string shader_id = xex_sha + "\n" + sdk.version + "\n";
+    auto shaders_failed = [&](const std::string& why) {
+        note("shaders: " + why);
+        std::lock_guard lk(prog.mutex);
+        prog.warning = "The native renderer's shaders could not be prepared (" + why +
+                       "). The game still runs, with its compatibility renderer; Update or repair tries again.";
+    };
+    if (!p.shaders) {
+        note("shader preparation skipped");
+    } else if (!fs::exists(tools / "prepare_shaders.py", ec) || !fs::exists(tools / "python" / "python.exe", ec)) {
+        shaders_failed("this setup has no shader tools");
+    } else if (util::ReadText(shader_stamp) == shader_id && fs::exists(shader_out / "shaders.dxil.pak", ec)) {
+        note("shaders already prepared");
+    } else {
+        fs::remove(shader_stamp, ec);
+        if (util::ReadText(shader_work / "converted_by.txt") != sdk.version) { // another release's converter: again
+            fs::remove_all(shader_work / "shaders_native", ec);
+            util::WriteText(shader_work / "converted_by.txt", sdk.version);
+        }
+        std::string why = RunShaderTool(p, jobs, prog, env, 0.0f, 0.86f);
+        if (why.empty() && !prog.cancel) {
+            // The shaders the game compiles itself as it starts (see SavedShadersDir): one short start of the game,
+            // silent and off every screen, collects them; then they are converted and packed with the rest.
+            note("starting the game once, silent and out of sight, to collect the shaders it makes itself");
+            // (the game's start can fail by itself: seen here as an assert three seconds in, several times in a row,
+            // then not at all - so up to three tries)
+            int saved = 0;
+            for (int attempt = 1; attempt <= 3 && saved == 0 && !prog.cancel; attempt++) {
+                saved = CollectStartupShaders(p, prog, env);
+                note(Format("the game saved %d shaders (start %d)", saved, attempt));
+            }
+            if (saved > 0 && !prog.cancel)
+                why = RunShaderTool(p, jobs, prog, env, 0.93f, 1.0f);
+            else if (saved == 0)
+                note("none saved: the launcher converts them before a later start instead");
+        }
+        if (prog.cancel)
+            return fail(4, "Cancelled (finished parts are kept; building again continues).");
+        if (!why.empty()) {
+            shaders_failed(why);
+        } else {
+            util::WriteText(shader_stamp, shader_id);
+            note("shaders prepared");
+        }
+    }
     prog.fraction = 1.0f;
     const double mins = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() / 60.0;
     note(Format("Done: built in %.0f minutes", mins));

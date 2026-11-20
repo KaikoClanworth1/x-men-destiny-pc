@@ -43,6 +43,7 @@ struct Paths {
     fs::path install_dir; // the game folder: the disc's files, xmd.exe, the DLLs, UserData\ (never touched)
     fs::path work_dir;    // generated C++, compiled parts, logs
     fs::path source;      // the player's .iso or folder
+    bool shaders = true;  // prepare the native renderer's shaders (developer tests of the rest turn it off)
 };
 
 enum Step { kRead, kTranslate, kCompile, kLink, kShaders, kStepCount };
@@ -55,11 +56,14 @@ struct Progress {
     std::atomic<float> fraction{0}; // of the current step
     std::atomic<int> done{0}, total{0}; // compiled parts
     std::atomic<u64> bytes_done{0}, bytes_total{0}; // game files read
+    std::atomic<int> shaders_done{0}, shaders_total{0}; // shaders converted
     std::mutex mutex;
     std::string error;
+    std::string warning; // the build worked, but the player should know (the shaders could not be prepared)
     std::vector<std::string> log; // last lines
     void Log(std::string s);
     std::string GetError();
+    std::string GetWarning();
     std::vector<std::string> Tail(size_t n);
     float Overall() const; // 0..1 over all steps
 };
@@ -67,9 +71,16 @@ struct Progress {
 // Runs every step (blocking; the window calls it on a worker thread). `jobs` compilers run at once.
 // Exit classes for the command line: 0 ok, 2 game input, 3 tools, 4 anything else.
 int BuildGame(const Paths& paths, int jobs, Progress& progress);
+// The game compiles a few shaders of its own while it runs (its program holds a shader compiler and their source):
+// they are in none of its files, so the running game saves each one it has no converted shader for into this folder
+// (<install>\UserData\cache\shaders_new\*.xsc). AddSavedShaders converts them and packs them with the rest (blocking;
+// seconds for a few shaders); the launcher does it before it starts the game.
+fs::path SavedShadersDir(const fs::path& install_dir);
+int SavedShaderCount(const fs::path& install_dir);
+bool AddSavedShaders(const Paths& paths, int jobs, Progress& progress, std::string& why);
 // Compiler jobs that fit this PC: cores - 1, at most one per 2 GB of RAM.
 int DefaultJobs();
-constexpr u64 kBuildFilesBytes = 1300ull << 20;     // generated C++, compiled parts
-constexpr u64 kProgramBytes = 250ull << 20;         // xmd.exe, its symbols, the DLLs
+constexpr u64 kBuildFilesBytes = 2000ull << 20;     // generated C++, compiled parts, converted shaders
+constexpr u64 kProgramBytes = 500ull << 20;         // xmd.exe, its symbols, the DLLs, the shader packs
 
 } // namespace builder

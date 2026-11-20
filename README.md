@@ -64,7 +64,8 @@ All pictures are of this port running.
 
 1. **Download** the latest `XMenDestiny-…-Windows-x64.zip` from [Releases](../../releases/latest) and unzip it anywhere.
 2. **Open `XMDSetup.exe`** and pick your copy of the game and where to install it.
-3. Press **Build the game**. The setup turns your copy into the PC version. This takes about 10 to 20 minutes, once.
+3. Press **Build the game**. The setup reads your game files, translates the game to PC code, compiles it, puts the game together and prepares the shaders. This takes about 20 to 40 minutes, once.
+   Near the end the setup starts the game once by itself, silent and out of sight, for under a minute. That's normal.
 4. Press **Play**.
 
 <table>
