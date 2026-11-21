@@ -1,2 +1,4 @@
 // The program's icon: the game's own title image (its disc's), sizes 16-256.
 1 ICON "xmd.ico"
+// The button prompts' pictures for keyboard and mouse, PlayStation and Nintendo pads (tools\make_glyphs.py, src\pad_icons.cpp).
+2 RCDATA "glyphs.bin"

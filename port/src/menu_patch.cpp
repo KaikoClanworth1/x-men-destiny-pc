@@ -558,7 +558,7 @@ std::vector<uint8_t> PatchMainMenu(const uint8_t* data, size_t size, std::string
 namespace {
 
 // The new characters' numbers (the movie's own stop below 200).
-constexpr uint16_t kRowText = 30001, kRow = 30002, kPage = 30003, kKeys = 30004;
+constexpr uint16_t kRowText = 30001, kRow = 30002, kPage = 30003, kKeys = 30004, kBindPage = 30005, kBindKeys = 30006;
 
 // The list's layout with six entries: where the first sits in Settings_MC and the step to the next (the disc's
 // five: -47.65 and 85).
@@ -665,6 +665,96 @@ Script GraphicsScript(int rows) {
   return s;
 }
 
+// ---- the key bindings page (frame "Bindings", opened with X from the game's Controls page) ----
+//
+// The same eight rows as the Graphics page, but the port moves through them: more rows exist than slots, so up
+// and down only tell the port (PCBindUp / PCBindDown(row)), which either moves the list's highlight (BindPrev /
+// BindNext) or gives the slots other texts. While the page is up it calls PCBindTick every frame: the port has
+// no tick of its own in the menus, and a key being waited for arrives outside the movie.
+
+Bytes ButtonHandlers(const std::vector<std::pair<uint16_t, Script>>& keys) {
+  Bytes out;
+  for (size_t i = 0; i < keys.size(); ++i) {
+    Bytes actions = keys[i].second.code;
+    actions.push_back(0);
+    Put16(out, i + 1 == keys.size() ? 0 : uint32_t(4 + actions.size()));
+    Put16(out, keys[i].first);
+    Append(out, actions);
+  }
+  return out;
+}
+
+Bytes BindingsKeys() {
+  const auto tell = [](const char* callback, const char* sound) {
+    Script s;
+    s.Call(sound);
+    Script arguments;
+    arguments.Get({"_root", "mBindListView", "miCurrentItem"});
+    s.ExternalCall(callback, 1, &arguments);
+    return s;
+  };
+  Script back;
+  back.ExternalCall("PCBindBack");  // (the port answers with BindLeave(), unless a key is being waited for)
+  return ButtonHandlers({
+      {14 << 9, tell("PCBindUp", "TriggerNavSound")},
+      {15 << 9, tell("PCBindDown", "TriggerNavSound")},
+      {1 << 9, tell("PCBindLeft", "TriggerNavSound")},
+      {2 << 9, tell("PCBindRight", "TriggerNavSound")},
+      {13 << 9, tell("PCBindPress", "TriggerSelectSound")},
+      {8 << 9, back},
+  });
+}
+
+Script BindingsScript(int rows) {
+  Script s;
+  {
+    Script body;
+    body.Push({true}).Push({"itemName"}).Op(kGetVariable).Push({2, "CTextBoxListViewItem"}).Op(kNewObject);
+    body.Push({1, "mBindListView"}).Op(kGetVariable).Push({"AddItem"}).Op(kCallMethod).Op(kPop);
+    s.Function("AddBindListViewItem", {"itemName"}, body);
+  }
+  {
+    Script body;
+    body.Get({"mBindListView", "mItems"}).Push({"index"}).Op(kGetVariable).Op(kGetMember);
+    body.Push({"msName"}).Push({"itemName"}).Op(kGetVariable).Op(kSetMember);
+    body.Push({0, "mBindListView"}).Op(kGetVariable).Push({"UpdateText"}).Op(kCallMethod).Op(kPop);
+    s.Function("SetBindItem", {"itemName", "index"}, body);
+  }
+  for (const char* method : {"OnPrevious", "OnNext"}) {
+    Script body;
+    body.Push({true, 1}).Get({"_root", "mBindListView"}).Push({method}).Op(kCallMethod).Op(kPop);
+    s.Function(method[2] == 'P' ? "BindPrev" : "BindNext", {}, body);
+  }
+  {
+    // function BindLeave() { ...back to the list, as the game's pages go... }
+    Script body;
+    body.Call("TriggerSelectSound").GoToLabel("SettingsHold").ExternalCall("PCBindClose").ExternalCall("CollapseSubMenu");
+    s.Function("BindLeave", {}, body);
+  }
+  s.Op(kStop);
+  s.Push({"mBindListView", 0, "CTextBoxListView"}).Op(kNewObject).Op(kDefineLocal);
+  const auto set = [&s](const char* member, Value value) {
+    s.Push({"mBindListView"}).Op(kGetVariable).Push({member, value}).Op(kSetMember);
+  };
+  set("msEmptyText", "");
+  set("mbOnFocusScale", true);
+  set("miOnFocusInitScale", int(std::lround(kRowScale * 100)));
+  set("miOnFocusScale", int(std::lround(kRowScale * 115)));
+  for (int row = 1; row <= rows; ++row) {
+    const std::string name = RowName(row);
+    AddReference(s, "mBindListView", {"_root", "SettingsBindings_MC", name.c_str()}, {"ItemTitle"});
+  }
+  {
+    Script body;
+    body.ExternalCall("PCBindTick");
+    s.Get({"_root", "SettingsBindings_MC"}).Push({"onEnterFrame"}).Function("", {}, body).Op(kSetMember);
+  }
+  s.ExternalCall("PCBindPopulate");
+  s.Push({0, "mBindListView"}).Op(kGetVariable).Push({"UpdateText"}).Op(kCallMethod).Op(kPop);
+  s.Push({0, 1, "mBindListView"}).Op(kGetVariable).Push({"OnUpdate"}).Op(kCallMethod).Op(kPop);
+  return s;
+}
+
 }  // namespace
 
 double OptionsButtonY(int index) { return kNavFirst + kNavStep * index; }
@@ -676,6 +766,8 @@ std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string*
 
   // First pass: the pieces of the Game page the Graphics page is made of.
   Tag list_sprite{}, game_row{}, game_page{}, game_keys{}, row_text{}, row_text_settings{}, keys_place{};
+  Tag controls_keys{};  // (the invisible button of the game's Controls page: the first after that page's sprite)
+  bool controls_page = false;
   uint16_t row_text_id = 0, game_keys_id = 0, panel = 0, title = 0;
   Place title_place;
   Tag tag;
@@ -710,6 +802,8 @@ std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string*
         if (p.name == "XMD_MENU_Titles_SubRight_MC") title = p.character, title_place = p;
       }
     }
+    if (tag.code == kDefineSprite && Holds(body, tag.size, "Controllers_MC")) controls_page = true;
+    if (tag.code == kDefineButton2 && controls_page && !controls_keys.size) controls_keys = tag;
     if (tag.code == kDefineButton2 && Holds(body, tag.size, "mGameListView")) {
       game_keys = tag;
       game_keys_id = U16(body);
@@ -783,6 +877,23 @@ std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string*
       if (!ExtendScript(data, tag, more, &body)) return Fail(why, "the list's script does not end as expected");
       PutTag(out, kDoAction, body);
       script = true;
+    } else if (tag.at == controls_keys.at && controls_keys.size && (parts & 8)) {
+      // The game's Controls page (a picture of the controller, B = back): X opens the key bindings page.
+      const uint8_t* b = data + tag.body;
+      const uint32_t actions = U16(b + 3);
+      size_t entry = tag.body + 3 + actions;
+      if (!actions || entry + 4 > tag.end()) return Fail(why, "the Controls page's button has no handlers");
+      while (U16(data + entry)) {
+        entry += U16(data + entry);
+        if (entry + 4 > tag.end()) return Fail(why, "the Controls page's button does not read");
+      }
+      Bytes body(data + tag.body, data + tag.end());
+      const size_t last = entry - tag.body, length = tag.end() - entry;
+      body[last] = uint8_t(length), body[last + 1] = uint8_t(length >> 8);
+      Script open;
+      open.Call("TriggerSelectSound").GoToLabel("Bindings");
+      Append(body, ButtonHandlers({{18 << 9, open}}));
+      PutTag(out, kDefineButton2, body);
     } else {
       Append(out, data + tag.at, whole);
     }
@@ -885,9 +996,61 @@ std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string*
     PutTag(out, kPlaceObject2, WritePlace(keys));
     PutTag(out, kShowFrame, {});
   }
+  // The key bindings page: its own page sprite (panel, rows, title - as the Graphics page) and keys, in one more
+  // frame, "Bindings".
+  const bool bindings = (parts & 8) && (parts & 4) && (parts & 2) && controls_keys.size;
+  if (bindings) {
+    Bytes body;
+    Put16(body, kBindPage);
+    Put16(body, 1);
+    Matrix m = At(3.65, 4.25);
+    m.scaled = true, m.sx = m.sy = 0;
+    m.rotated = true, m.r0 = Fixed(1.069), m.r1 = Fixed(-1.086);
+    PutTag(body, kPlaceObject2, WritePlace(NewPlace(1, panel, m, "")));
+    for (int row = 1; row <= rows; ++row) {
+      PutTag(body, kPlaceObject2,
+             WritePlace(NewPlace(uint16_t(4 + row * 10), kRow, At(kRowX, kRowFirstY + kRowStep * (row - 1), kRowScale),
+                                 RowName(row))));
+    }
+    Place t = title_place;
+    t.depth = uint16_t(4 + (rows + 1) * 10);
+    t.matrix.tx = Twips(195.50);
+    t.matrix.ty = Twips(-235.35);
+    PutTag(body, kPlaceObject2, WritePlace(t));
+    PutTag(body, kShowFrame, {});
+    PutTag(body, kEnd, {});
+    PutTag(out, kDefineSprite, body);
+
+    const uint8_t* b = data + game_keys.body;
+    const uint32_t actions = U16(b + 3);
+    Bytes keys_body;
+    Put16(keys_body, kBindKeys);
+    Append(keys_body, b + 2, 1 + actions);
+    Append(keys_body, BindingsKeys());
+    PutTag(out, kDefineButton2, keys_body);
+
+    for (uint16_t gone : {uint16_t(18), uint16_t(122)}) {
+      Bytes depth;
+      Put16(depth, gone);
+      PutTag(out, kRemoveObject2, depth);
+    }
+    Bytes code = BindingsScript(rows).code;
+    code.push_back(0);
+    PutTag(out, kDoAction, code);
+    Bytes label;
+    PutText(label, "Bindings");
+    PutTag(out, kFrameLabel, label);
+    PutTag(out, kPlaceObject2, WritePlace(NewPlace(18, kBindPage, At(kPageX, kPageY), "SettingsBindings_MC")));
+    Place keys = ReadPlace(data, keys_place);
+    keys.character = kBindKeys;
+    keys.has_ratio = false;
+    PutTag(out, kPlaceObject2, WritePlace(keys));
+    PutTag(out, kShowFrame, {});
+  }
   Append(out, data + end_tag, size - end_tag);
-  // (one frame more, in the header)
-  if (parts & 4) out[first - 2] = uint8_t(frames + 1), out[first - 1] = uint8_t((frames + 1) >> 8);
+  // (the frames added, in the header)
+  const uint32_t added = ((parts & 4) ? 1u : 0u) + (bindings ? 1u : 0u);
+  if (added) out[first - 2] = uint8_t(frames + added), out[first - 1] = uint8_t((frames + added) >> 8);
   Finish(out);
   return out;
 }

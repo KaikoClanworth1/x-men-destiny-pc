@@ -29,8 +29,9 @@ constexpr int kGraphicsRows = 8;
 // The changed movie, or an empty vector when the movie is not the one expected (another version of the game:
 // the menu then stays as the disc has it). `why` gets the reason.
 std::vector<uint8_t> PatchMainMenu(const uint8_t* data, size_t size, std::string* why);
+// (parts: 8 = the key bindings page, frame "Bindings", and the X handler on the game's Controls page)
 // `parts` (a debugging aid, tools\menu_patch_test.cpp): 1 the list's sixth button, 2 the Graphics page's pieces,
 // 4 the Graphics frame.
-std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string* why, unsigned parts = 7);
+std::vector<uint8_t> PatchOptions(const uint8_t* data, size_t size, std::string* why, unsigned parts = 15);
 
 }  // namespace xmd::menupatch

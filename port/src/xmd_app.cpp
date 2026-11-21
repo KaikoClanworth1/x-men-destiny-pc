@@ -5,6 +5,7 @@
 #include "xmd_app.h"
 #include "script_input.h"
 #include "controls.h"
+#include "pad_icons.h"
 #include "crash_report.h"
 #include "capture.h"
 #include "debug_commands.h"
@@ -97,7 +98,7 @@ void XmdApp::OnPreSetup(rex::RuntimeConfig& config) {
   if (!Env("XMD_AUDIO_MUTE").empty()) {
     rex::cvar::SetFlagByName("audio_mute", "true");
   }
-  xmd::controls::Configure();  // (keyboard and mouse on, with this game's layout: controls.h)
+  xmd::controls::Configure(g_config_file);  // (keyboard and mouse on, with this game's layout: controls.h)
   // Automated tests: the only controller is one driven by a command file.
   if (std::string file = Env("XMD_INPUT_FILE"); !file.empty()) {
     xmd::InstallScriptLogSink();  // (now: logging is up, no game thread yet)
@@ -173,6 +174,7 @@ void XmdApp::OnCreateDialogs(rex::ui::ImGuiDrawer* drawer) {
     EnumWindows(&Find::Each, reinterpret_cast<LPARAM>(icon));
   }
 #endif
+  xmd::InstallPadIcons();                        // (button prompts for the device in use: pad_icons.h)
   xmd::InstallPerfOverlay(drawer);               // (F2: FPS, CPU and GPU time a frame)
   xmd::InstallCapture(g_user_data, g_problem_file);  // (F4: screenshot, draws, log, where the player is)
   xmd::modmenu::Install(drawer, g_user_data);        // (F1: the mod menu - mod_menu.h)
@@ -214,7 +216,8 @@ void XmdApp::OnPostLoadXexImage() {
         });
       },
       [this](std::function<void()> f) { app_context().CallInUIThread(std::move(f)); }, g_config_file);
-  xmd::controls::Install(runtime()->virtual_membase(), [this] { return InteractiveOverlayOpen(); });
+  xmd::controls::Install(runtime()->virtual_membase(), [this] { return InteractiveOverlayOpen(); },
+                         static_cast<rex::input::InputSystem*>(runtime()->input_system()));
   // Tests: XMD_DEBUG_FILE=<file>, lines run as Lua in the game's script state (debug_commands.cpp).
   // (without one: still there for the port's own questions to the scripts - an F4 capture's "where")
   xmd::debug::Install(Env("XMD_DEBUG_FILE"), runtime()->memory()->SystemHeapAlloc(xmd::debug::ScratchSize()));

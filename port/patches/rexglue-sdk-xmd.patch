@@ -423,7 +423,7 @@ index 4ce4f9b..101fc50 100644
  
  #define REX_EXPORT_STUB(name) \
 diff --git a/include/rex/input/device.h b/include/rex/input/device.h
-index 7b67ceb..dacad53 100644
+index 7b67ceb..0f46eb9 100644
 --- a/include/rex/input/device.h
 +++ b/include/rex/input/device.h
 @@ -15,7 +15,7 @@
@@ -435,8 +435,16 @@ index 7b67ceb..dacad53 100644
  
  /// Driver-scoped device handle. Never reused within a process run, so a handle
  /// that outlives its device resolves to nothing rather than aliasing whichever
+@@ -27,6 +27,7 @@ struct DeviceInfo {
+   uint32_t ordinal = 0;  // connection order, assigned by InputSystem
+   std::string name;
+   std::string guid;
++  uint32_t family = 0;     // [xmd] a pad's kind, for button prompts: 0 Xbox-style, 1 PlayStation, 2 Nintendo
+   bool synthetic = false;  // keyboard/mouse emulation or the NOP stand-in
+ };
+ 
 diff --git a/include/rex/input/input_system.h b/include/rex/input/input_system.h
-index 1cb3faa..b129457 100644
+index 1cb3faa..980a6df 100644
 --- a/include/rex/input/input_system.h
 +++ b/include/rex/input/input_system.h
 @@ -10,7 +10,9 @@
@@ -449,7 +457,7 @@ index 1cb3faa..b129457 100644
  #include <vector>
  
  #include <rex/input/device_assignment.h>
-@@ -47,6 +49,20 @@ class InputSystem : public system::IInputSystem {
+@@ -47,6 +49,25 @@ class InputSystem : public system::IInputSystem {
    X_RESULT SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration);
    X_RESULT GetKeystroke(uint32_t user_index, uint32_t flags, X_INPUT_KEYSTROKE* out_keystroke);
  
@@ -463,6 +471,11 @@ index 1cb3faa..b129457 100644
 +  void SetStateObserver(std::function<void(uint32_t, const X_INPUT_STATE&)> observer) {
 +    state_observer_ = std::move(observer);
 +  }
++  /// [xmd] Called with every device's state as its driver gave it, before the devices of a user are merged:
++  /// the port's button remapping (it may change the state). Set once, before the guest polls.
++  void SetDeviceStateFilter(std::function<void(const DeviceInfo&, X_INPUT_GAMEPAD&)> filter) {
++    device_state_filter_ = std::move(filter);
++  }
 +  /// [svr2011] The last real state polled for `user_index` while held
 +  /// (false if none yet).
 +  bool HeldState(uint32_t user_index, X_INPUT_STATE* out_state);
@@ -470,13 +483,14 @@ index 1cb3faa..b129457 100644
   private:
    /// Re-enumerates every driver and notifies the assignment when the set
    /// changed.
-@@ -65,6 +81,12 @@ class InputSystem : public system::IInputSystem {
+@@ -65,6 +86,13 @@ class InputSystem : public system::IInputSystem {
    // does not renumber pad two.
    std::vector<DeviceInfo> devices_;
    std::vector<InputDriver*> device_owners_;
 +
 +  std::function<bool()> guest_input_hold_;  // [svr2011]
 +  std::function<void(uint32_t, const X_INPUT_STATE&)> state_observer_;  // [xmd]
++  std::function<void(const DeviceInfo&, X_INPUT_GAMEPAD&)> device_state_filter_;  // [xmd]
 +  std::mutex held_mutex_;
 +  X_INPUT_STATE held_state_[kMaxGuestUsers] = {};
 +  bool held_valid_[kMaxGuestUsers] = {};
@@ -484,10 +498,10 @@ index 1cb3faa..b129457 100644
  
  /// Create a default InputSystem with SDL + NOP drivers.
 diff --git a/include/rex/input/mnk/mnk_input_driver.h b/include/rex/input/mnk/mnk_input_driver.h
-index c8751b7..df6c73d 100644
+index c8751b7..5761e42 100644
 --- a/include/rex/input/mnk/mnk_input_driver.h
 +++ b/include/rex/input/mnk/mnk_input_driver.h
-@@ -25,6 +25,19 @@ namespace rex::input::mnk {
+@@ -25,6 +25,24 @@ namespace rex::input::mnk {
  void SetMouseLookActive(bool active);
  bool IsMouseLookActive();
  
@@ -499,6 +513,11 @@ index c8751b7..df6c73d 100644
 +bool IsMouseCaptured();
 +// [xmd] Automated tests: in test mode the driver is on and counts as focused whatever the window's state, never
 +// captures the real cursor and ignores the real keyboard and mouse - its only input is what is injected here.
++// [xmd] The keys and mouse buttons held at the driver's last poll, by virtual key (the port's "press a key to
++// bind"), and plain keys: with it on, Shift / Ctrl / Alt held never silence the other keys (the port's settings
++// use no "Shift+key" combinations).
++void KeysDown(bool out[256]);
++void SetPlainKeys(bool on);
 +void SetTestMode(bool on);
 +bool IsTestMode();
 +void TestInjectKey(uint16_t virtual_key, bool down);
@@ -507,7 +526,7 @@ index c8751b7..df6c73d 100644
  class MnkInputDriver final : public InputDriver,
                               public rex::ui::WindowInputListener,
                               public rex::ui::WindowListener {
-@@ -96,8 +109,13 @@ class MnkInputDriver final : public InputDriver,
+@@ -96,8 +114,13 @@ class MnkInputDriver final : public InputDriver,
    // Guest thread to UI thread. The queued flag coalesces the posts.
    std::atomic<bool> mouse_capture_requested_{false};
    std::atomic<bool> mouse_capture_update_queued_{false};
@@ -3865,7 +3884,7 @@ index 6788214..1b37e1c 100644
      if (dfn.vkCreateBuffer(device, &buffer_create_info, nullptr, &buffer_) == VK_SUCCESS) {
        VkMemoryRequirements buffer_memory_requirements;
 diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
-index 813bb1c..b21b307 100644
+index 813bb1c..1842837 100644
 --- a/src/input/input_system.cpp
 +++ b/src/input/input_system.cpp
 @@ -10,6 +10,8 @@
@@ -3899,7 +3918,17 @@ index 813bb1c..b21b307 100644
    std::vector<DeviceInfo> seen;
    std::vector<InputDriver*> owners;
    std::vector<DeviceInfo> enumerated;
-@@ -245,12 +262,33 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+@@ -233,6 +250,9 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
+     if (driver->GetDeviceState(id, &state) != X_ERROR_SUCCESS) {
+       continue;
+     }
++    if (device_state_filter_) {  // [xmd] the port's remapping
++      if (const DeviceInfo* info = DeviceInfoFor(id)) device_state_filter_(*info, state.gamepad);
++    }
+     active_devices_.Observe(user_index, id, state.gamepad);
+     if (!any) {
+       merged = state;
+@@ -245,12 +265,33 @@ X_RESULT InputSystem::GetState(uint32_t user_index, X_INPUT_STATE* out_state) {
    if (!any) {
      return X_ERROR_DEVICE_NOT_CONNECTED;
    }
@@ -3933,7 +3962,7 @@ index 813bb1c..b21b307 100644
  X_RESULT InputSystem::SetState(uint32_t user_index, X_INPUT_VIBRATION* vibration) {
    SCOPE_profile_cpu_f("hid");
    if (!assignment_) {
-@@ -310,6 +348,9 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
+@@ -310,6 +351,9 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
        continue;
      }
      X_RESULT result = driver->GetDeviceKeystroke(id, flags, out_keystroke);
@@ -3944,7 +3973,7 @@ index 813bb1c..b21b307 100644
        out_keystroke->user_index = static_cast<uint8_t>(user_index);
        return result;
 diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
-index 3f9422d..a8a8ff1 100644
+index 3f9422d..20c9721 100644
 --- a/src/input/mnk/mnk_input_driver.cpp
 +++ b/src/input/mnk/mnk_input_driver.cpp
 @@ -21,6 +21,7 @@
@@ -3996,7 +4025,7 @@ index 3f9422d..a8a8ff1 100644
    uint8_t want = TakeModifiers(token);
    if (want != live_mods) {
      return false;
-@@ -137,8 +152,52 @@ bool TokenPressed(const bool (&key_down)[256], std::string_view token, uint8_t l
+@@ -137,8 +152,63 @@ bool TokenPressed(const bool (&key_down)[256], std::string_view token, uint8_t l
  
  std::atomic<bool> mouse_look_active{true};
  
@@ -4008,6 +4037,8 @@ index 3f9422d..a8a8ff1 100644
 +float g_sink_dx = 0.0f, g_sink_dy = 0.0f;
 +std::mutex g_test_mutex;
 +bool g_test_keys[256] = {};
++std::atomic<bool> g_plain_keys{false};
++bool g_keys_seen[256] = {};  // (under g_sink_mutex)
 +float g_test_dx = 0.0f, g_test_dy = 0.0f;
 +
  }  // namespace
@@ -4025,6 +4056,15 @@ index 3f9422d..a8a8ff1 100644
 +
 +bool IsMouseCaptured() {
 +  return g_captured.load(std::memory_order_relaxed);
++}
++
++void KeysDown(bool out[256]) {
++  std::lock_guard lock(g_sink_mutex);
++  std::memcpy(out, g_keys_seen, sizeof(g_keys_seen));
++}
++
++void SetPlainKeys(bool on) {
++  g_plain_keys.store(on, std::memory_order_relaxed);
 +}
 +
 +void SetTestMode(bool on) {
@@ -4049,7 +4089,7 @@ index 3f9422d..a8a8ff1 100644
  void SetMouseLookActive(bool active) {
    mouse_look_active.store(active, std::memory_order_relaxed);
  }
-@@ -167,6 +226,8 @@ void MnkInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+@@ -167,6 +237,8 @@ void MnkInputDriver::OnWindowAvailable(rex::ui::Window* window) {
        std::lock_guard lock(state_mutex_);
        attached_window_ = window;
      }
@@ -4058,7 +4098,7 @@ index 3f9422d..a8a8ff1 100644
      window->AddInputListener(this, window_z_order());
      window->AddListener(this);
    }
-@@ -197,11 +258,27 @@ void MnkInputDriver::DetachFromWindow() {
+@@ -197,11 +269,27 @@ void MnkInputDriver::DetachFromWindow() {
  }
  
  bool MnkInputDriver::IsEnabled() const {
@@ -4088,7 +4128,7 @@ index 3f9422d..a8a8ff1 100644
    std::string_view rest(cvar_val);
    while (!rest.empty()) {
      size_t comma = rest.find(',');
-@@ -261,10 +338,13 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+@@ -261,10 +349,13 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
  
    // Mouse look is opt in. Without this gate, keyboard input alone would hide
    // and lock the cursor, breaking the ImGui overlays.
@@ -4105,7 +4145,7 @@ index 3f9422d..a8a8ff1 100644
      if (out_state) {
        std::memset(out_state, 0, sizeof(*out_state));
        out_state->packet_number = packet_number_;
-@@ -274,6 +354,27 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+@@ -274,6 +365,31 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
  
    std::lock_guard lock(state_mutex_);
  
@@ -4117,7 +4157,11 @@ index 3f9422d..a8a8ff1 100644
 +    g_test_dx = g_test_dy = 0.0f;
 +  }
 +
-+  g_live_mods = uint8_t(LiveModifiers(key_down_) &
++  {
++    std::lock_guard seen(g_sink_mutex);
++    std::memcpy(g_keys_seen, key_down_, sizeof(g_keys_seen));
++  }
++  g_live_mods = g_plain_keys.load(std::memory_order_relaxed) ? uint8_t(0) : uint8_t(LiveModifiers(key_down_) &
 +                        ~BareModifiers({&REXCVAR_GET(keybind_a), &REXCVAR_GET(keybind_b), &REXCVAR_GET(keybind_x),
 +                                        &REXCVAR_GET(keybind_y), &REXCVAR_GET(keybind_left_shoulder),
 +                                        &REXCVAR_GET(keybind_right_shoulder), &REXCVAR_GET(keybind_lstick_press),
@@ -4133,7 +4177,7 @@ index 3f9422d..a8a8ff1 100644
    uint16_t buttons = 0;
    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_a)))
      buttons |= X_INPUT_GAMEPAD_A;
-@@ -331,7 +432,13 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+@@ -331,7 +447,13 @@ X_RESULT MnkInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
    if (IsBindPressed(key_down_, REXCVAR_GET(keybind_rstick_down)))
      ry -= INT16_MAX;
  
@@ -4148,7 +4192,7 @@ index 3f9422d..a8a8ff1 100644
      double sensitivity = REXCVAR_GET(mnk_sensitivity);
      constexpr double kBaseScale = 200.0;
      rx += static_cast<int32_t>(double(mouse_dx_) * sensitivity * kBaseScale);
-@@ -398,17 +505,31 @@ void MnkInputDriver::EnqueueKeystroke(uint16_t vk_pad, bool down) {
+@@ -398,17 +520,31 @@ void MnkInputDriver::EnqueueKeystroke(uint16_t vk_pad, bool down) {
  
  void MnkInputDriver::QueueMouseCaptureUpdate(bool should_capture) {
    mouse_capture_requested_.store(should_capture, std::memory_order_relaxed);
@@ -4183,7 +4227,7 @@ index 3f9422d..a8a8ff1 100644
      mouse_capture_update_queued_.store(false, std::memory_order_relaxed);
      ApplyMouseCaptureFromUIThread();
    });
-@@ -421,13 +542,17 @@ void MnkInputDriver::ApplyMouseCaptureFromUIThread() {
+@@ -421,13 +557,17 @@ void MnkInputDriver::ApplyMouseCaptureFromUIThread() {
    }
    bool should_capture = mouse_capture_requested_.load(std::memory_order_relaxed);
    if (should_capture == mouse_captured_) {
@@ -4202,7 +4246,7 @@ index 3f9422d..a8a8ff1 100644
    precapture_cursor_visibility_ = window->GetCursorVisibility();
    window->SetCursorVisibility(rex::ui::Window::CursorVisibility::kHidden);
    window->CaptureMouse();
-@@ -442,6 +567,7 @@ void MnkInputDriver::ApplyMouseCaptureFromUIThread() {
+@@ -442,6 +582,7 @@ void MnkInputDriver::ApplyMouseCaptureFromUIThread() {
  }
  
  void MnkInputDriver::ReleaseMouseCaptureFromUIThread(rex::ui::Window* window) {
@@ -4210,7 +4254,7 @@ index 3f9422d..a8a8ff1 100644
    if (!mouse_captured_) {
      return;
    }
-@@ -459,7 +585,7 @@ void MnkInputDriver::RecenterCursorFromUIThread(int32_t x, int32_t y) {
+@@ -459,7 +600,7 @@ void MnkInputDriver::RecenterCursorFromUIThread(int32_t x, int32_t y) {
    }
    int32_t width = int32_t(window->GetActualPhysicalWidth());
    int32_t height = int32_t(window->GetActualPhysicalHeight());
@@ -4219,7 +4263,7 @@ index 3f9422d..a8a8ff1 100644
      return;
    }
    // Only once the pointer has drifted well off the middle, to keep warps rare.
-@@ -481,7 +607,7 @@ void MnkInputDriver::SetKeyState(uint16_t vk, bool down) {
+@@ -481,7 +622,7 @@ void MnkInputDriver::SetKeyState(uint16_t vk, bool down) {
  }
  
  void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
@@ -4228,7 +4272,7 @@ index 3f9422d..a8a8ff1 100644
      return;
    std::lock_guard lock(state_mutex_);
    uint16_t vk = static_cast<uint16_t>(e.virtual_key());
-@@ -489,7 +615,7 @@ void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
+@@ -489,7 +630,7 @@ void MnkInputDriver::OnKeyDown(rex::ui::KeyEvent& e) {
  }
  
  void MnkInputDriver::OnKeyUp(rex::ui::KeyEvent& e) {
@@ -4237,7 +4281,7 @@ index 3f9422d..a8a8ff1 100644
      return;
    std::lock_guard lock(state_mutex_);
    uint16_t vk = static_cast<uint16_t>(e.virtual_key());
-@@ -497,7 +623,7 @@ void MnkInputDriver::OnKeyUp(rex::ui::KeyEvent& e) {
+@@ -497,7 +638,7 @@ void MnkInputDriver::OnKeyUp(rex::ui::KeyEvent& e) {
  }
  
  void MnkInputDriver::OnMouseDown(rex::ui::MouseEvent& e) {
@@ -4246,7 +4290,7 @@ index 3f9422d..a8a8ff1 100644
      return;
    std::lock_guard lock(state_mutex_);
    switch (e.button()) {
-@@ -510,13 +636,19 @@ void MnkInputDriver::OnMouseDown(rex::ui::MouseEvent& e) {
+@@ -510,13 +651,19 @@ void MnkInputDriver::OnMouseDown(rex::ui::MouseEvent& e) {
      case rex::ui::MouseEvent::Button::kMiddle:
        SetKeyState(static_cast<uint16_t>(VirtualKey::kMButton), true);
        break;
@@ -4267,7 +4311,7 @@ index 3f9422d..a8a8ff1 100644
      return;
    std::lock_guard lock(state_mutex_);
    switch (e.button()) {
-@@ -529,13 +661,19 @@ void MnkInputDriver::OnMouseUp(rex::ui::MouseEvent& e) {
+@@ -529,13 +676,19 @@ void MnkInputDriver::OnMouseUp(rex::ui::MouseEvent& e) {
      case rex::ui::MouseEvent::Button::kMiddle:
        SetKeyState(static_cast<uint16_t>(VirtualKey::kMButton), false);
        break;
@@ -4288,6 +4332,32 @@ index 3f9422d..a8a8ff1 100644
      return;
    int32_t x = e.x();
    int32_t y = e.y();
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index c7c440d..c540514 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -162,6 +162,21 @@ void SDLInputDriver::EnumerateDevices(std::vector<DeviceInfo>& out) {
+                      static_cast<int>(sizeof(guid_text)));
+     info.guid = guid_text;
+     info.synthetic = false;
++    switch (SDL_GetGamepadType(controller.sdl)) {  // [xmd] for the port's button prompts
++      case SDL_GAMEPAD_TYPE_PS3:
++      case SDL_GAMEPAD_TYPE_PS4:
++      case SDL_GAMEPAD_TYPE_PS5:
++        info.family = 1;
++        break;
++      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
++      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
++      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
++      case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
++        info.family = 2;
++        break;
++      default:
++        break;
++    }
+     out.push_back(info);
+   }
+ }
 diff --git a/src/input/xinput/xinput_input_driver.cpp b/src/input/xinput/xinput_input_driver.cpp
 index a6a1da9..b022494 100644
 --- a/src/input/xinput/xinput_input_driver.cpp

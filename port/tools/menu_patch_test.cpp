@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
   std::string why;
   std::vector<uint8_t> out;
   if (name == "XMDMenuMain") out = xmd::menupatch::PatchMainMenu(data.data(), data.size(), &why);
-  else if (name == "XMDMenuOptions") out = xmd::menupatch::PatchOptions(data.data(), data.size(), &why, argc > 3 ? unsigned(std::atoi(argv[3])) : 7u);
+  else if (name == "XMDMenuOptions") out = xmd::menupatch::PatchOptions(data.data(), data.size(), &why, argc > 3 ? unsigned(std::atoi(argv[3])) : 15u);
   else why = "no change for this movie";
   std::printf("%s: %zu bytes -> %zu bytes %s\n", name.c_str(), data.size(), out.size(), why.c_str());
   if (out.empty()) return 1;

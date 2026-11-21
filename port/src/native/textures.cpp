@@ -1038,7 +1038,7 @@ bool Upload(const Context& ctx, const xenos::xe_gpu_texture_fetch_t& fetch, uint
   const bool gamma = fetch.sign_x == xenos::TextureSign::kGamma;
   RenderFormat resource_format = gamma && host.gamma != RenderFormat::UNKNOWN ? host.gamma : host.format;
   // (an icon page with PlayStation pictures - pad_icons.h - recognized below)
-  const bool pad_candidate = (format == TF::k_DXT4_5 || format == TF::k_DXT1) && !is_3d && !is_cube &&
+  const bool pad_candidate = (format == TF::k_DXT4_5 || format == TF::k_DXT1 || format == TF::k_DXT2_3) && !is_3d && !is_cube &&
                              array_size == 1 && guest_levels == 1 && xmd::PadIconsCandidate(width, height);
 
   // A re-upload (guest data changed) reuses the texture and its view: the
@@ -1212,6 +1212,7 @@ bool Upload(const Context& ctx, const xenos::xe_gpu_texture_fetch_t& fetch, uint
       for (uint32_t x = 0; x < row_bytes; ++x) h = (h ^ row[x]) * 0x100000001B3ull;
     }
     pad_hash = h;
+    xmd::PadIconsTextureUploaded(base_page << 12, width, height, pad_hash);  // (also when another picture is shown)
     const xmd::PadIconsPicture pic = xmd::PadIconsAtlas(width, height, h);
     if (pic.rgba) {
       const RenderFormat rgba = gamma ? RenderFormat::R8G8B8A8_UNORM_SRGB : RenderFormat::R8G8B8A8_UNORM;
@@ -1622,6 +1623,22 @@ uint32_t Texture(const Context& ctx, const uint32_t fetch_dwords[6], uint32_t di
 }
 
 void UploadChanging(const Context& ctx) {
+  // [controls] The button prompts' pictures changed (another device in use, a new binding - pad_icons.h): their
+  // textures count as written, with a hash that cannot match, so the next use uploads them again.
+  {
+    static std::vector<uint32_t> prompt_bases;
+    if (xmd::PadIconsTakeChanged(&prompt_bases)) {
+      ++g_generation;
+      for (auto& [key, e] : g_textures) {
+        for (uint32_t base : prompt_bases) {
+          if (e.base_size && e.base_address == base) {
+            e.hash = ~e.hash;
+            e.written = true;
+          }
+        }
+      }
+    }
+  }
   static const bool off = std::getenv("XMD_TEST_NO_UPLOAD_CHANGING") != nullptr;  // (test aid: as before)
   if (off || g_changing.empty() || g_no_cache || g_check_every_use) return;
   for (size_t i = g_changing.size(); i-- > 0;) {

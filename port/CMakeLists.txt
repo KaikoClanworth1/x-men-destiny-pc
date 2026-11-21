@@ -28,6 +28,8 @@ set(XMD_SOURCES
     src/pc_menu.cpp
     src/menu_patch.cpp
     src/controls.cpp
+    src/controls_bind.cpp
+    src/pad_icons.cpp
 )
 # The program's icon (res/xmd.ico: the game's own title image).
 if(WIN32)

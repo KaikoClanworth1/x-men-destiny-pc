@@ -58,32 +58,6 @@ uint32_t LoadU(uint32_t address) {
   return std::byteswap(raw);
 }
 
-// The layout: a PC action game's. `value` is the runtime's key list (alternatives joined with commas).
-struct Default {
-  const char* setting;
-  const char* value;
-};
-const Default kLayout[] = {
-    {"keybind_lstick_up", "W"},          {"keybind_lstick_down", "S"},
-    {"keybind_lstick_left", "A"},        {"keybind_lstick_right", "D"},
-    {"keybind_x", "LMB"},                // light attack
-    {"keybind_y", "RMB"},                // heavy attack
-    {"keybind_a", "Space,Return"},       // jump / accept
-    {"keybind_b", "Shift,Backspace"},    // dodge / back
-    {"keybind_right_shoulder", "Q,MMB"}, // block
-    {"keybind_left_shoulder", "R"},      // X-Mode
-    {"keybind_right_trigger", "E"},      // mutant powers (held with an attack key)
-    {"keybind_left_trigger", "F"},       // focus camera
-    {"keybind_lstick_press", "C"},       {"keybind_rstick_press", "V"},
-    {"keybind_rstick_up", ""},           {"keybind_rstick_down", ""},
-    {"keybind_rstick_left", ""},         {"keybind_rstick_right", ""},
-    {"keybind_dpad_up", "Up"},           {"keybind_dpad_down", "Down"},
-    {"keybind_dpad_left", "Left"},       {"keybind_dpad_right", "Right"},
-    {"keybind_start", "Escape"},         // pause
-    {"keybind_back", "Tab"},             // map
-    {"keybind_guide", ""},
-};
-
 // Camera probe (debug lines "cam scan" / "cam diff"): which of the camera's values move.
 std::mutex g_scan_mutex;
 std::vector<float> g_scan;
@@ -114,6 +88,7 @@ void MouseLook(uint32_t pad) {
   SetMouseLookActive(!(g_overlay_open && g_overlay_open()) && !xmd::modmenu::IsOpen());
   float dx = 0, dy = 0;
   TakeMouseDelta(&dx, &dy);
+  if (dx != 0 || dy != 0) NoteMouseUsed();  // (for the button prompts)
   const uint32_t cam = g_camera.load();
   if (!cam || LoadU(cam) != g_camera_vtable.load()) return;  // (no camera, or its memory is something else now)
   const int64_t now = NowMs();
@@ -145,21 +120,20 @@ void MouseLook(uint32_t pad) {
 
 }  // namespace
 
-void Configure() {
+void Configure(const std::filesystem::path& settings_file) {
   using rex::cvar::GetFlagSource;
   using rex::cvar::SetFlagByName;
   using rex::cvar::Source;
   if (GetFlagSource("mnk_mode") == Source::kDefault) SetFlagByName("mnk_mode", "true");
   if (GetFlagSource("mnk_mouse") == Source::kDefault) SetFlagByName("mnk_mouse", "true");
-  for (const Default& d : kLayout) {
-    if (GetFlagSource(d.setting) == Source::kDefault) SetFlagByName(d.setting, d.value);
-  }
+  LoadBindings(settings_file);  // (the layout: controls_bind.cpp)
   rex::input::mnk::SetMouseDeltaSink(true);
 }
 
-void Install(uint8_t* membase, std::function<bool()> overlay_open) {
+void Install(uint8_t* membase, std::function<bool()> overlay_open, rex::input::InputSystem* input) {
   g_base = membase;
   g_overlay_open = std::move(overlay_open);
+  AttachBindings(input);
 }
 
 bool Command(const std::string& verb, const std::string& rest) {
@@ -169,16 +143,43 @@ bool Command(const std::string& verb, const std::string& rest) {
   in >> what;
   const uint32_t cam = g_camera.load(), pad = g_pad.load();
   if (verb == "controls") {
-    if (what == "trace") {
+    auto device_of = [](const std::string& word) { return word == "pad" ? Device::kPad : Device::kKeyboardMouse; };
+    if (what == "list") {
+      for (int i = 0; i < ActionCount(); ++i) {
+        REXLOG_INFO("controls: {:2} {:20} key: {:14} pad: {}", i, ActionName(i),
+                    BindingText(i, Device::kKeyboardMouse), BindingText(i, Device::kPad));
+      }
+      REXLOG_INFO("controls: capture state {}, last device {}", static_cast<int>(CaptureState()),
+                  LastUsedDevice() == Device::kPad ? "pad" : "keyboard and mouse");
+    } else if (what == "bind") {
+      std::string device;
+      int action = -1;
+      in >> device >> action;
+      REXLOG_INFO("controls: bind {} {}: {}", device, ActionName(action),
+                  BeginCapture(action, device_of(device)) ? "waiting for a press" : "cannot be bound");
+    } else if (what == "state") {
+      REXLOG_INFO("controls: capture state {} text \"{}\"", static_cast<int>(CaptureState()), CaptureText());
+    } else if (what == "set") {
+      std::string device, name;
+      int action = -1;
+      in >> device >> action >> name;
+      REXLOG_INFO("controls: set {} {} = {}: {}", device, ActionName(action), name,
+                  SetBindingByName(action, device_of(device), name) ? "ok" : "refused");
+    } else if (what == "reset") {
+      std::string device;
+      in >> device;
+      ResetDefaults(device_of(device));
+      REXLOG_INFO("controls: {} back to the defaults", device);
+    } else if (what == "trace") {
       int frames = 60;
       in >> frames;
       g_trace = frames;
     } else if (pad) {
       REXLOG_INFO("controls: pad {:08X} left {:.3f} {:.3f} right {:.3f} {:.3f} dead zone {:.3f} invert {} {} {} {} "
-                  "captured {}",
+                  "captured {} buttons {:08X} held {:08X}",
                   pad, LoadF(pad + 48), LoadF(pad + 52), LoadF(pad + 248), LoadF(pad + 252), LoadF(pad + 548),
                   LoadU(pad + 552), LoadU(pad + 556), LoadU(pad + 560), LoadU(pad + 564),
-                  rex::input::mnk::IsMouseCaptured());
+                  rex::input::mnk::IsMouseCaptured(), LoadU(pad + 16), LoadU(pad + 24));
     } else {
       REXLOG_INFO("controls: no pad read yet");
     }

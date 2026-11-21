@@ -52,7 +52,9 @@ function Shot([string]$n) {
 foreach ($s in $Steps) {
     $f = $s -split ':'
     if (-not (Get-Process xmd -ErrorAction SilentlyContinue)) { "the game is gone before step $s"; break }
-    if ($f[0] -ne '-') { Add-Content (Join-Path $port 'runs\input.txt') "press $($f[0]) 200" -Encoding ascii }
+    # (a button of the scripted pad, or key=<name>: a key of the scripted keyboard - the controls chat's "key" line)
+    if ($f[0] -like 'key=*') { Add-Content (Join-Path $port 'runs\input.txt') "key $($f[0].Substring(4)) 200" -Encoding ascii }
+    elseif ($f[0] -ne '-') { Add-Content (Join-Path $port 'runs\input.txt') "press $($f[0]) 200" -Encoding ascii }
     Start-Sleep -Milliseconds ([int]([double]$f[1] * 1000))
     if ($f.Count -gt 2 -and $f[2]) { Shot $f[2] }
 }

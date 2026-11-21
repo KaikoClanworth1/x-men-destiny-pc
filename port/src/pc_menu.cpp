@@ -61,6 +61,7 @@
 #include <rex/ppc.h>
 
 #include "generated/default/xmd_init.h"
+#include "controls.h"
 #include "menu_patch.h"
 
 REX_EXTERN(__imp__sub_82718CF0);
@@ -99,6 +100,9 @@ bool g_exit_listed = false;       // (the main menu's list is the game's four en
 bool g_confirming_exit = false;   // (the "Exit Game?" page is up)
 bool g_title_ending = false;      // (the title screen's "button pressed" frames play; IISCompleted not yet seen)
 bool g_difficulty_hidden = false; // (the game hid the Options list's fifth entry, as it does on the main menu)
+// The Options legend's X entry ("Select Storage Device") as the game last set it: the Controls page borrows it.
+std::string g_legend_x_text;
+bool g_legend_x_shown = true, g_legend_x_borrowed = false;
 
 uint32_t Guest32(uint8_t* base, uint32_t address) {
   uint32_t v;
@@ -545,6 +549,186 @@ void ChangeGraphics(PPCContext& ctx, uint8_t* base, int index, int direction) {
   SaveSettings();
 }
 
+// ---- the key bindings page ----
+//
+// Opened with X from the game's own Controls page (the legend's X entry reads "Customize" there). Rows: the
+// device shown (keyboard and mouse / controller), every action of controls.h with its key or button, the mouse
+// rows on the keyboard side, "Reset to Defaults". Eight slots show a window of them (g_bind_top = the first row
+// shown). A on an action waits for the next key or button (controls::BeginCapture); the page's PCBindTick, every
+// frame, sees it end. The bindings themselves, and saving them, are controls.cpp's.
+
+constexpr int kBindSlots = menupatch::kGraphicsRows;
+controls::Device g_bind_device = controls::Device::kKeyboardMouse;
+int g_bind_top = 0, g_bind_waiting = -1;  // (g_bind_waiting: the row whose key is being waited for)
+
+enum class BindRow { kDevice, kAction, kSensitivity, kInvertY, kReset };
+struct BindEntry {
+  BindRow kind;
+  int action;
+};
+std::vector<BindEntry> BindRows() {
+  std::vector<BindEntry> rows = {{BindRow::kDevice, 0}};
+  for (int i = 0; i < controls::ActionCount(); ++i) rows.push_back({BindRow::kAction, i});
+  if (g_bind_device == controls::Device::kKeyboardMouse) {
+    rows.push_back({BindRow::kSensitivity, 0});
+    rows.push_back({BindRow::kInvertY, 0});
+  }
+  rows.push_back({BindRow::kReset, 0});
+  return rows;
+}
+std::string BindText(const BindEntry& row, bool waiting) {
+  const bool keys = g_bind_device == controls::Device::kKeyboardMouse;
+  switch (row.kind) {
+    case BindRow::kDevice:
+      return keys ? "Device:  Keyboard and Mouse" : "Device:  Controller";
+    case BindRow::kAction:
+      return std::string(controls::ActionName(row.action)) + ":  " +
+             (waiting ? (keys ? "press a key..." : "press a button...") : controls::BindingText(row.action, g_bind_device));
+    case BindRow::kSensitivity:
+      return fmt::format("Mouse Sensitivity:  {:.1f}", controls::MouseSensitivity());
+    case BindRow::kInvertY:
+      return "Invert Mouse Y";
+    case BindRow::kReset:
+      return "Reset to Defaults";
+  }
+  return {};
+}
+std::string BindSlotPath(int slot) { return "_root.SettingsBindings_MC.SelectionBox_MC" + std::to_string(slot + 1); }
+
+// The slots' texts and tick boxes for the rows now in view.
+void ShowBindings(PPCContext& ctx, uint8_t* base, bool first) {
+  const std::vector<BindEntry> rows = BindRows();
+  g_bind_top = std::clamp(g_bind_top, 0, std::max(0, int(rows.size()) - kBindSlots));
+  for (int slot = 0; slot < kBindSlots; ++slot) {
+    const int index = g_bind_top + slot;
+    const bool there = index < int(rows.size());
+    const std::string text = there ? BindText(rows[size_t(index)], index == g_bind_waiting) : std::string();
+    if (first) {
+      CallMovie(ctx, base, g_options_object, "AddBindListViewItem", &text);
+    } else {
+      CallMovie(ctx, base, g_options_object, "SetBindItem", &text, &slot);
+    }
+    const bool tick = there && rows[size_t(index)].kind == BindRow::kInvertY;
+    SetMovieFlag(ctx, base, g_options_object, BindSlotPath(slot) + ".ToggleBox_MC._visible", tick);
+    if (tick) {
+      const std::string frame = controls::MouseInvertY() ? "On" : "Off";
+      CallMovie(ctx, base, g_options_object, (BindSlotPath(slot) + ".ToggleBox_MC.gotoAndPlay").c_str(), &frame);
+    }
+  }
+}
+
+// The legend's X entry: "Customize" on the game's Controls page, the game's own again afterwards.
+void BorrowLegendX(PPCContext& ctx, uint8_t* base, bool borrow) {
+  if (borrow == g_legend_x_borrowed) return;
+  g_legend_x_borrowed = borrow;
+  const bool shown = borrow || g_legend_x_shown;
+  if (borrow || !g_legend_x_text.empty()) {
+    SetMovieText(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.ItemTitle4.text",
+                 borrow ? "Customize" : g_legend_x_text);
+  }
+  SetMovieFlag(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.ItemTitle4._visible", shown);
+  SetMovieFlag(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.SaveButton._visible", shown);
+}
+
+// A call of the bindings page (PCBind...); `slot`: the highlighted slot, where the call gives one.
+void OnBindingsCall(PPCContext& ctx, uint8_t* base, const std::string& name, int slot) {
+  const std::vector<BindEntry> rows = BindRows();
+  const int count = int(rows.size());
+  if (name == "PCBindPopulate") {
+    g_bind_device = controls::LastUsedDevice();
+    g_bind_top = 0, g_bind_waiting = -1;
+    controls::ClearCapture();
+    ShowBindings(ctx, base, true);
+    SetMovieText(ctx, base, g_options_object, "_root.SettingsBindings_MC.XMD_MENU_Titles_SubRight_MC.ItemTitle.text",
+                 "Controls");
+    // The legend: no X here, but "Select" and "Activate", which the game hid for its Controls page (its own
+    // CollapseSubMenu shows everything again when the list is back).
+    g_legend_x_borrowed = false;
+    SetMovieFlag(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.ItemTitle4._visible", false);
+    SetMovieFlag(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.SaveButton._visible", false);
+    for (const char* part : {"ItemTitle1", "MovementIcon", "ItemTitle2", "ActivateButton"}) {
+      SetMovieFlag(ctx, base, g_options_object, std::string("_root.SettingsButtonLegend_MC.") + part + "._visible", true);
+    }
+    if (!g_legend_x_text.empty()) {
+      SetMovieText(ctx, base, g_options_object, "_root.SettingsButtonLegend_MC.ItemTitle4.text", g_legend_x_text);
+    }
+    return;
+  }
+  if (name == "PCBindTick") {
+    if (g_bind_waiting < 0) return;
+    const controls::Capture state = controls::CaptureState();
+    if (state == controls::Capture::kWaiting) return;
+    REXLOG_INFO("menus: binding of row {} {}", g_bind_waiting,
+                state == controls::Capture::kDone ? "set to " + controls::CaptureText()
+                : state == controls::Capture::kTimedOut ? std::string("timed out") : std::string("cancelled"));
+    g_bind_waiting = -1;
+    controls::ClearCapture();
+    ShowBindings(ctx, base, false);  // (every row: a key another action had has swapped)
+    return;
+  }
+  if (name == "PCBindClose") {
+    if (g_bind_waiting >= 0) controls::CancelCapture(), controls::ClearCapture();
+    g_bind_waiting = -1;
+    return;
+  }
+  if (g_bind_waiting >= 0) return;  // (a key is being waited for: nothing else happens)
+  if (name == "PCBindBack") {
+    CallMovie(ctx, base, g_options_object, "BindLeave");
+    return;
+  }
+  const int index = g_bind_top + slot;
+  if (slot < 0 || slot >= kBindSlots || index >= count) return;
+  if (name == "PCBindUp") {
+    if (slot > 0) {
+      CallMovie(ctx, base, g_options_object, "BindPrev");
+    } else if (g_bind_top > 0) {
+      --g_bind_top;
+      ShowBindings(ctx, base, false);
+    }
+    return;
+  }
+  if (name == "PCBindDown") {
+    if (slot < kBindSlots - 1 && index + 1 < count) {
+      CallMovie(ctx, base, g_options_object, "BindNext");
+    } else if (index + 1 < count) {
+      ++g_bind_top;
+      ShowBindings(ctx, base, false);
+    }
+    return;
+  }
+  const BindEntry& row = rows[size_t(index)];
+  const bool press = name == "PCBindPress";
+  const int direction = name == "PCBindLeft" ? -1 : 1;
+  switch (row.kind) {
+    case BindRow::kDevice:
+      g_bind_device = g_bind_device == controls::Device::kPad ? controls::Device::kKeyboardMouse : controls::Device::kPad;
+      g_bind_top = 0;
+      break;
+    case BindRow::kAction:
+      if (!press || !controls::CanBind(row.action, g_bind_device)) return;
+      if (!controls::BeginCapture(row.action, g_bind_device)) return;
+      g_bind_waiting = index;
+      break;
+    case BindRow::kSensitivity: {
+      const double now = std::round(controls::MouseSensitivity() * 10.0) / 10.0;
+      double next = now + 0.1 * direction;
+      if (press && next > 5.0 + 1e-9) next = 0.1;  // (A goes around)
+      controls::SetMouseSensitivity(std::clamp(next, 0.1, 5.0));
+      break;
+    }
+    case BindRow::kInvertY:
+      controls::SetMouseInvertY(!controls::MouseInvertY());
+      break;
+    case BindRow::kReset:
+      if (!press) return;
+      controls::ResetDefaults(g_bind_device);
+      REXLOG_INFO("menus: bindings reset to the defaults ({})",
+                  g_bind_device == controls::Device::kPad ? "controller" : "keyboard and mouse");
+      break;
+  }
+  ShowBindings(ctx, base, false);
+}
+
 // The changed movie in place of the disc's, for the memory file Scaleform is about to read.
 void SwapMovie(uint8_t* base, uint32_t file) {
   if (!g_block || file < 0x10000 || Guest32(base, file) != kMemoryFileVtable) return;
@@ -630,7 +814,7 @@ uint32_t GuestBlockSize() { return kTextRoom + kMainMenuRoom + kOptionsRoom; }
 bool OnFlashCall(PPCContext& ctx, uint8_t* base) {
   const std::string name = GuestString(base, ctx.r5.u32, 80);
   const uint32_t values = ctx.r6.u32, count = ctx.r7.u32;
-  if (g_trace) {
+  if (g_trace && name != "PCBindTick") {
     REXLOG_INFO("menu trace: flash -> game {}({}) r3 {:08X} r4 {:08X}", name, Arguments(base, values, count),
                 ctx.r3.u32, ctx.r4.u32);
   }
@@ -694,8 +878,15 @@ bool OnFlashCall(PPCContext& ctx, uint8_t* base) {
       return true;
     }
     if (name == "PCGraphicsClose") return true;
+    if (name.rfind("PCBind", 0) == 0) {
+      OnBindingsCall(ctx, base, name, count == 1 ? number(0) : -1);
+      return true;
+    }
+    // The game's Controls page: X opens the bindings page, and the legend says so.
+    if (name == "PopulateControlsMenu") BorrowLegendX(ctx, base, true);
+    if (name == "CollapseSubMenu") BorrowLegendX(ctx, base, false);
   }
-  return name.rfind("PCGraphics", 0) == 0;
+  return name.rfind("PCGraphics", 0) == 0 || name.rfind("PCBind", 0) == 0;
 }
 
 }  // namespace xmd::pcmenu
@@ -739,11 +930,23 @@ REX_HOOK_RAW(sub_82718900) {
     REXLOG_INFO("menu trace: game -> flash {} = L\"{}\" object {:08X}", xmd::pcmenu::GuestString(base, ctx.r4.u32),
                 xmd::pcmenu::GuestWideString(base, ctx.r5.u32), ctx.r3.u32);
   }
+  if (xmd::pcmenu::GuestString(base, ctx.r4.u32, 64) == "_root.SettingsButtonLegend_MC.ItemTitle4.text") {
+    xmd::pcmenu::g_legend_x_text = xmd::pcmenu::GuestWideString(base, ctx.r5.u32);
+    xmd::pcmenu::g_legend_x_borrowed = false;
+  }
   __imp__sub_82718900(ctx, base);
 }
 REX_HOOK_RAW(sub_82718748) {
   if (xmd::pcmenu::GuestString(base, ctx.r4.u32, 64) == "_root.Settings_MC.Settings_Nav_MC5._visible") {
     xmd::pcmenu::g_difficulty_hidden = (ctx.r5.u32 & 0xFF) == 0;
+  }
+  if (const std::string path = xmd::pcmenu::GuestString(base, ctx.r4.u32, 64);
+      path == "_root.SettingsButtonLegend_MC.ItemTitle4._visible" || path == "_root.SettingsButtonLegend_MC.SaveButton._visible") {
+    if (xmd::pcmenu::g_legend_x_borrowed) {
+      ctx.r5.u64 = 1;  // (the game hides the whole legend but "Back" on its Controls page: X stays, it opens the bindings)
+    } else if (path.find("ItemTitle4") != std::string::npos) {
+      xmd::pcmenu::g_legend_x_shown = (ctx.r5.u32 & 0xFF) != 0;
+    }
   }
   if (xmd::pcmenu::g_trace) {
     REXLOG_INFO("menu trace: game -> flash {} = {} object {:08X}", xmd::pcmenu::GuestString(base, ctx.r4.u32),
