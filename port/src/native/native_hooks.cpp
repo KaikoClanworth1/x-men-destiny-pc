@@ -226,6 +226,20 @@ REX_HOOK_RAW(sub_82741028) {
   __imp__sub_82741028(ctx, base);
   if (primary && nr::Enabled()) nr::OnRunCommandBuffer(buffer, predication);
 }
+// D3DDevice_CreatePixelShader / CreateVertexShader(container): the ones the game compiles itself have no
+// converted shader yet - saved for the launcher to convert (native_renderer.cpp NoteCreatedShader).
+REX_EXTERN(__imp__sub_8272FA60);
+REX_HOOK_RAW(sub_8272FA60) {
+  nr::BeforeD3DCall();
+  if (nr::Enabled()) nr::OnShaderCreated(ctx.r3.u32, true);
+  __imp__sub_8272FA60(ctx, base);
+}
+REX_EXTERN(__imp__sub_8272FE08);
+REX_HOOK_RAW(sub_8272FE08) {
+  nr::BeforeD3DCall();
+  if (nr::Enabled()) nr::OnShaderCreated(ctx.r3.u32, false);
+  __imp__sub_8272FE08(ctx, base);
+}
 // D3DDevice_SetPixelShader(device, shader): whose microcode is whose, for the command buffers' shader loads.
 REX_EXTERN(__imp__sub_8272FB50);
 REX_HOOK_RAW(sub_8272FB50) {

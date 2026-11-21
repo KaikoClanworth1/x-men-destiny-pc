@@ -648,6 +648,7 @@ bool OnFlashCall(PPCContext& ctx, uint8_t* base) {
       if (chose && number(0) == 0) {
         REXLOG_INFO("menus: Exit confirmed - closing the game");
         g_confirming_exit = false;
+        KeepOnExit();  // (the runtime ends the process without the C runtime's exit handlers)
         if (g_exit) g_exit();
         return true;
       }

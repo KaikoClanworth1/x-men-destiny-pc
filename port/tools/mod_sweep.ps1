@@ -162,17 +162,15 @@ foreach ($id in $Ids) {
         $status = if (-not (Alive)) { 'crash' } elseif ($err) { 'error' } else { 'ran' }
         $r = @($status, '', [int]((Get-Date) - $t0).TotalSeconds)
         if ($status -eq 'crash') { StopMine } else {
-            # While a cut-scene plays the game runs none of the commands waiting: a position question without an
-            # answer says "playing". START / A skip most scenes; one that cannot be skipped ends with the game.
+            # While a cut-scene plays (and during a load) the game runs none of the commands waiting: a position
+            # question without an answer says "busy". It gets 40 s to end; then the game is started again. (No
+            # button is pressed to skip: START opened the pause menu when the "scene" was a loading screen.)
             $answers = [bool](Where-Now 5)
             if (-not $answers) {
-                $note = (($note, 'busy') | Where-Object { $_ }) -join '; '
-                for ($try = 0; $try -lt 3 -and -not $answers; $try++) {
-                    Add-Content (Join-Path $runs 'input.txt') "press START 200`nwait 600`npress A 200`nwait 600" -Encoding ascii
-                    Start-Sleep 3
-                    $answers = [bool](Where-Now 5)
-                }
-                if ($answers) { $note += '; skipped' } else { $note += '; not skippable'; StopMine }
+                $t1 = Get-Date
+                for ($try = 0; $try -lt 4 -and -not $answers; $try++) { $answers = [bool](Where-Now 10) }
+                $note = (($note, "busy $([int]((Get-Date) - $t1).TotalSeconds + 5) s") | Where-Object { $_ }) -join '; '
+                if (-not $answers) { $note += ' and more'; Shot "${id}_later"; StopMine }
             }
             if (Alive) { Send 'mod run control' }
             $prepared = $false

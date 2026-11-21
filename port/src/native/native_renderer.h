@@ -116,6 +116,8 @@ void OnDraw(uint32_t primitive, uint32_t start, uint32_t count, bool indexed);
 // The D3D library gives the GPU a shader's microcode (either device): whose it is.
 void OnShaderMicrocode(uint32_t container, uint32_t microcode);
 void OnPixelShaderSet(uint32_t object);
+// CreateVertexShader / CreatePixelShader: a container with no converted shader is saved for the launcher to convert.
+void OnShaderCreated(uint32_t container, bool pixel);
 void DebugFindStream(uint32_t device, uint32_t stream, uint32_t buffer, uint32_t offset);
 // The game plays a recorded command buffer (guest object).
 void OnRunCommandBuffer(uint32_t buffer, uint32_t predication);

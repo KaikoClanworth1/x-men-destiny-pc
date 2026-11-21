@@ -671,6 +671,69 @@ Shader* FindShader(uint32_t object, bool pixel) {
   return known.shader->missing ? nullptr : known.shader;
 }
 
+// [xmd] Shaders the game compiles itself while it runs (its exe holds an HLSL compiler and shader source: 31 of
+// the shaders are in no file): each container handed to CreateVertexShader / CreatePixelShader is kept until the
+// renderer can tell whether its converted shader exists, and one that has none is written to
+// <user data>\cache\shaders_new\<FNV-1a of the container>.<vs|ps>.xsc - unpatched, as tools\convert_shaders.py
+// wants it. The launcher converts that folder before the next start (the installer's shader step).
+std::filesystem::path PipelineCacheFile();
+struct CreatedShader {
+  std::string converted;  // (convert_shaders.py output_name)
+  std::vector<uint8_t> container;
+  bool pixel;
+};
+std::mutex g_created_mutex;
+std::vector<CreatedShader> g_created_shaders;
+std::unordered_set<uint64_t> g_created_seen;
+
+void NoteCreatedShader(uint32_t container, bool pixel) {
+  if (!g_memory || container < 0x10000 || !GuestReadable(container, 0x24)) return;
+  const uint8_t* p = Virtual(container);
+  if ((Be32(p) & 0xFFFFFF00u) != 0x102A1100u) return;
+  const uint32_t vsize = Be32(p + 4), size = vsize + Be32(p + 8);
+  if (vsize < 0x24 || size > 0x100000 || !GuestReadable(container, size)) return;
+  uint64_t whole = 1469598103934665603ull, virt = whole;
+  for (uint32_t i = 0; i < size; ++i) {
+    whole = (whole ^ p[i]) * 1099511628211ull;
+    if (i < vsize) virt = (virt ^ (i == 3 ? uint8_t(p[i] & 0xBF) : p[i])) * 1099511628211ull;
+  }
+  char name[64];
+  std::snprintf(name, sizeof(name), "%016llX.%s", static_cast<unsigned long long>(pixel ? whole : virt),
+                pixel ? "ps" : "vs");
+  std::lock_guard lock(g_created_mutex);
+  if (!g_created_seen.insert(whole * 2 + (pixel ? 1 : 0)).second) return;
+  g_created_shaders.push_back({name, std::vector<uint8_t>(p, p + size), pixel});
+}
+
+// On the renderer's thread, now and then: the kept containers checked against the converted shaders.
+void SaveNewShaders() {
+  std::vector<CreatedShader> created;
+  {
+    std::lock_guard lock(g_created_mutex);
+    created.swap(g_created_shaders);
+  }
+  for (const CreatedShader& s : created) {
+    if (ShaderExists(s.converted)) continue;
+    uint64_t whole = 1469598103934665603ull;
+    for (uint8_t b : s.container) whole = (whole ^ b) * 1099511628211ull;
+    char name[64];
+    std::snprintf(name, sizeof(name), "%016llX.%s.xsc", static_cast<unsigned long long>(whole), s.pixel ? "ps" : "vs");
+    const std::filesystem::path dir = PipelineCacheFile().parent_path() / "shaders_new";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const std::filesystem::path file = dir / name, part = dir / (std::string(name) + ".part");
+    const bool there = std::filesystem::exists(file, ec);
+    if (!there) {
+      std::ofstream out(part, std::ios::binary | std::ios::trunc);
+      out.write(reinterpret_cast<const char*>(s.container.data()), std::streamsize(s.container.size()));
+      out.close();
+      if (out) std::filesystem::rename(part, file, ec);
+    }
+    REXLOG_INFO("native renderer: the game made a shader with no converted one ({}, {} bytes) - {} cache\\shaders_new\\{}",
+                s.converted, s.container.size(), there ? "already in" : "saved to", name);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // renderer state
 
@@ -1078,6 +1141,7 @@ uint32_t g_scale = 1;
 // [xmd] The render scale's ceiling after memory ran out (OutOfVideoMemory): a step lower each time a target or
 // the frame images can't be made above 1x.
 uint32_t g_memory_scale_cap = UINT32_MAX;
+uint64_t g_memory_report_frame = ~0ull;  // (BeginFrame logs the video memory in use at this frame)
 // native_scale_effects off: only the main scene's targets (and their resolves
 // and the frame images) are scaled; the effect buffers (the 1120 x 1120 shadow
 // map, reflections, glow and blur chains) keep the guest's size.
@@ -2009,8 +2073,10 @@ bool WaitForFrame(Renderer* r, uint32_t slot, const char* what) {
   // went up, mostly - is waited for (kGpuPatienceMs in all), and the render scale comes down a step for the
   // next frames, instead of the renderer giving up for the rest of the session on one slow frame.
   if (!lost) {
-    REXLOG_WARN("native renderer: the GPU has not finished ({}) after {} ms at render scale {}x - waiting on", what,
-                kGpuTimeoutMs, g_scale);
+    uint64_t used = 0, budget = 0;
+    backend::VideoMemory(&used, &budget);
+    REXLOG_WARN("native renderer: the GPU has not finished ({}) after {} ms at render scale {}x (video memory in use "
+                "{} MB of a budget of {} MB) - waiting on", what, kGpuTimeoutMs, g_scale, used >> 20, budget >> 20);
     for (uint32_t waited = kGpuTimeoutMs; !lost && waited < kGpuPatienceMs; waited += 1000) {
       if (r->queue->waitForCommandFenceTimeout(r->fences[slot].get(), 1000)) {
         r->submitted[slot] = false;
@@ -2158,10 +2224,26 @@ uint32_t FitRenderScale(uint32_t s, float wide, float tall, const char*& why) {
     const uint64_t side = std::min<uint64_t>(2080ull * scale, kMaxEffectSide);
     return side * side * 24;
   };
+  auto need = [&](uint32_t scale) {
+    return uint64_t(tw * float(scale)) * uint64_t(th * float(scale)) * kBytesPerScenePixel + effects(scale);
+  };
   if (const uint64_t vram = VideoMemoryBytes())
-    while (s > kMemoryFrom &&
-           uint64_t(tw * float(s)) * uint64_t(th * float(s)) * kBytesPerScenePixel + effects(s) > vram / kShare)
-      --s, why = "video memory";
+    while (s > kMemoryFrom && need(s) > vram / kShare) --s, why = "video memory";
+  // [xmd] And what is free of it now (the budget Windows gives this process less what is in use - other programs'
+  // and games' share is outside the budget): going up a scale must fit in four fifths of that. Going down or
+  // staying is never refused.
+  uint64_t used = 0, budget = 0;
+  if (s > g_scale && backend::VideoMemory(&used, &budget) && budget) {
+    const uint64_t free_now = budget > used ? budget - used : 0;
+    const uint32_t asked = s;
+    while (s > g_scale && need(s) - need(g_scale) > free_now / 5 * 4) --s, why = "the video memory free now";
+    if (s != asked) {  // (kept for the session: not asked again every frame, no jumping up in the middle of play)
+      g_memory_scale_cap = s;
+      REXLOG_WARN("native renderer: render scale {}x needs about {} MB more video memory, {} MB are free ({} of {} MB "
+                  "in use) - staying at {}x", asked, (need(asked) - need(g_scale)) >> 20, free_now >> 20, used >> 20,
+                  budget >> 20, s);
+    }
+  }
   return s;
 }
 
@@ -2355,6 +2437,13 @@ void ApplyOutputSettings(Renderer* r) {
   if (fit_why)
     REXLOG_INFO("native renderer: render scale {} instead of {} for {}x{} ({}; video memory {} MB)", scale,
                 wanted_scale, g_out_w, g_out_h, fit_why, VideoMemoryBytes() >> 20);
+  {
+    uint64_t used = 0, budget = 0;
+    if (backend::VideoMemory(&used, &budget))
+      REXLOG_INFO("native renderer: video memory in use {} MB of a budget of {} MB (before the new targets)",
+                  used >> 20, budget >> 20);
+    g_memory_report_frame = r->frames + 90;
+  }
   REXLOG_INFO("native renderer: output {}x{}, render scale {}x{}{}{}{}{}", g_out_w, g_out_h, g_scale,
               g_res < 1.0f ? fmt::format(" (scene at {:.0f}%)", g_res * 100) : std::string(),
               g_fsr ? fmt::format(", FSR {} from {}p", g_fsr2 ? 2 : 1, uint32_t(std::lround(kHeight * g_scale * g_res)))
@@ -2393,6 +2482,13 @@ bool BeginFrame(Renderer* r) {
   if (r->frame_open) return true;
   if (g_main) ApplyTextureQuality(r);
   if (g_main) ApplyOutputSettings(r);
+  if (r->frames % 120 == 0) SaveNewShaders();
+  if (r->frames == g_memory_report_frame) {  // (a while after a render scale change: what its targets took)
+    uint64_t used = 0, budget = 0;
+    if (backend::VideoMemory(&used, &budget))
+      REXLOG_INFO("native renderer: video memory in use {} MB of a budget of {} MB at render scale {}x", used >> 20,
+                  budget >> 20, g_scale);
+  }
   if (g_failed || !r->outputs[0]) return false;  // (no frame images: out of memory - made again at the next frame)
   r->back_index = uint32_t(r->frames % kFrames);
   r->output_index = uint32_t(r->frames % kOutputs);
@@ -7652,6 +7748,9 @@ void OnShaderMicrocode(uint32_t container, uint32_t microcode) {
   set(PhysicalOf(microcode));
   if (code_at && code_at < 0x10000) set(PhysicalOf(microcode) + code_at);
 }
+
+// CreateVertexShader / CreatePixelShader(container), any thread.
+void OnShaderCreated(uint32_t container, bool pixel) { NoteCreatedShader(container, pixel); }
 
 // SetPixelShader(device, object), either device.
 void OnPixelShaderSet(uint32_t object) {

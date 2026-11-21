@@ -12,8 +12,9 @@
 //    names are the "CheckPoints" table's MapName column in databases.zzz. Warp() below does the same.
 //  * Cut-scenes: an in-engine scene is a "cineplex" actor inside a level archive; the mission scripts start it
 //    with cineplexaction("<actor id>", 0) after load("<archive>"). The list (mod_menu_tables.inc) is generated
-//    from the scripts by tools\mod_menu_tables.py. A scene plays where its level has it: from another level its
-//    actors stand in the wrong place or are missing.
+//    from the scripts by tools\mod_menu_tables.py, which keeps the scenes tools\mod_sweep.ps1 saw play
+//    (tools\mod_menu_scenes.txt) with the checkpoint each played from: an entry loads that checkpoint, then
+//    starts the scene. While a scene plays the game runs none of the commands waiting (nor this menu's).
 //  * All 93 checkpoints (missions 1-7, 15 arenas) were loaded one after another by tools\mod_sweep.ps1 (2026-11-20).
 //  * Tried and left out (2026-11-20): killallenemies() kills nobody in a fight and killall(1) removes the player
 //    too; EquipFansuit / UnequipFansuit with every name form change nothing (suits: unlock them, wear them in the
@@ -127,6 +128,8 @@ std::string g_warp_before, g_warp_last;
 std::string g_warp_then, g_warp_name;
 int g_warp_then_mission = -1, g_warp_mission = -1;
 bool g_warp_direct = false;
+// (what follows a warp once the place is there: a cut-scene's start)
+std::function<void()> g_warp_after;
 Clock::time_point g_warp_started;
 
 bool SamePlace(const std::string& a, const std::string& b, float tolerance) {
@@ -154,14 +157,17 @@ std::string CurrentCheckpoint(uint8_t* base, uint32_t state) {
 
 // What the Mission Select menu's StartMission does with the entry chosen, then the load.
 // `direct`: no detour (the detour itself, and the load after it).
-void Warp(const std::string& checkpoint, int mission, bool direct = false) {
+void Warp(const std::string& checkpoint, int mission, bool direct = false, std::function<void()> after = {}) {
   if (!g_scratch || checkpoint.size() + 40 > kScratchSize) return;
   {
     std::lock_guard lock(g_warp_mutex);
     g_warp_name = checkpoint;
     g_warp_mission = mission;
     g_warp_direct = direct;
-    if (!direct) g_warp_then.clear();
+    if (!direct) {
+      g_warp_then.clear();
+      g_warp_after = std::move(after);
+    }
   }
   g_warp_ticks = 0;
   g_still_ticks = 0;
@@ -246,6 +252,12 @@ void EndWarp(bool loaded, const std::string& notice) {
   });
   if (loaded) Lua(kFadeIn);
   ShowNotice(notice, loaded ? 2.0f : 6.0f);
+  std::function<void()> after;
+  {
+    std::lock_guard lock(g_warp_mutex);
+    after.swap(g_warp_after);
+  }
+  if (loaded && after) after();
 }
 
 // A quarter of a second of a warp (the ticker's).
@@ -576,6 +588,8 @@ struct Scene {
   const char* actor;
   const char* own;      // (the scene's own archive, "" when the script names none)
   const char* packs;    // (character packs it uses, space-separated)
+  const char* checkpoint;  // (where it was seen to play: loaded first)
+  int mission;
 };
 const Scene kScenes[] = {
 #include "mod_menu_tables.inc"
@@ -597,7 +611,7 @@ void SetSpeed(float speed) {
   ShowNotice(text, 2.0f);
 }
 
-void PlayScene(const Scene& scene) {
+void StartScene(const Scene& scene) {
   // (what the scene needs first - loading something again does no harm - then its actor once that is there)
   std::string lua;
   std::istringstream packs(scene.packs);
@@ -608,6 +622,13 @@ void PlayScene(const Scene& scene) {
   const std::string actor = scene.actor;
   Later(7000, [actor] { Lua("cineplexaction(\"" + actor + "\", 0)"); });
   ShowNotice(std::string("Cut-scene: ") + (scene.own[0] ? scene.own : scene.archive) + " - loading ...", 6.0f);
+}
+
+// The scene's place first (the checkpoint tools\mod_sweep.ps1 saw it play from), then the scene.
+void PlayScene(const Scene& scene) {
+  if (!scene.checkpoint[0]) return StartScene(scene);
+  ShowNotice(std::string("Cut-scene: loading ") + scene.checkpoint + " first ...", 5.0f);
+  Warp(scene.checkpoint, scene.mission, false, [scene] { Later(3000, [scene] { StartScene(scene); }); });
 }
 
 // The player moved by an offset (the game's units: 100 are about a metre).
@@ -724,7 +745,9 @@ void Build() {
       const Scene scene = s;
       Action(page, "scene_" + Slug(archive) + "_" + std::to_string(s.number),
              "Scene " + std::to_string(s.number) + (s.own[0] ? "  (" + Pretty(s.own) + ")" : std::string()),
-             std::string("Plays where its level has it. ") + s.actor, [scene] { PlayScene(scene); });
+             std::string("Loads ") + s.checkpoint + " and plays the scene there. While it plays the game "
+             "takes nothing from this menu.",
+             [scene] { PlayScene(scene); });
     }
   }
 
