@@ -7,7 +7,7 @@ The port has four goals. This page is kept up to date as the work goes on.
 | **1. The game runs** | ✅ Done. Intro movies, title, menus, character selection, cut-scenes and gameplay. |
 | **2. Fully native**: no emulated graphics or sound, no stutter, above 60 fps | 🔧 In progress. |
 | **3. PC settings inside the game's own menus**: graphics, controller, key remapping | 🔧 Started. *Exit* and *Options → Graphics* are in. Controller and remapping pages aren't. |
-| **4. An easy installer** | 🔧 The setup works on the developer's PC and is being tested. No release yet. |
+| **4. An easy installer** | 🔧 First release out (v0.1.0). The setup has only been tested on the developer's PC so far. |
 
 ## What works
 
@@ -16,7 +16,7 @@ The port has four goals. This page is kept up to date as the work goes on.
 - **Sound output through XAudio2**, in stereo or 5.1.
 - **Controllers** through SDL (Xbox, PlayStation, Switch Pro and others). Rumble is passed through but untested.
 - **Exit** on the main menu, and **Options → Graphics**: fullscreen, resolution, anti-aliasing, VSync, frame-rate limit, shadows, texture quality and texture filtering. Settings are saved.
-- **A mod menu** (F1): cheats, warps to the game's checkpoints, cut-scenes, game speed.
+- **A mod menu** (F1): cheats, warps to all 93 checkpoints (missions and challenge arenas), 42 cut-scenes, game speed.
 - **F4 captures** and a problem log, for reporting faults.
 
 ## What doesn't yet
@@ -28,6 +28,6 @@ The port has four goals. This page is kept up to date as the work goes on.
 - **The game ran at 30 fps on the console.** A frame-rate limit setting exists; running above 30 is experimental.
 - **Keyboard and mouse** are switched off by default, and the default key layout isn't made for this game yet.
 - **Button prompts** always show Xbox 360 buttons.
-- **Mod menu**: the Mission 7 warps don't work, and most of the cut-scene list is untested.
+- **Mod menu**: there is no direct suit equip, and only the 42 cut-scenes that play on their own are listed.
 - The setup recognises one release of the game; other regions' discs are refused as "Wrong version".
 - Languages other than English, 5.1 output and changing the sound device while playing are untested.

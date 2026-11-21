@@ -13,7 +13,7 @@
 > **There is no game in this repository.** You need your **own copy** of *X-Men: Destiny* for Xbox 360. The setup builds the PC version from it, on your PC.
 
 > [!WARNING]
-> **Work in progress.** The game is playable, but the port isn't finished and the first download isn't out yet.
+> **Work in progress.** The game is playable, but the port isn't finished. This is an early release: expect faults, and please report them.
 
 ---
 
@@ -51,8 +51,6 @@ All pictures are of this port running.
 ---
 
 ## How to install
-
-> The setup is still being tested. The first download isn't out yet.
 
 **You need**
 
