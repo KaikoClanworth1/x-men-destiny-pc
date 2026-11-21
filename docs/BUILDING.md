@@ -49,6 +49,7 @@ Run them from the repository root.
    python port/tools/extract_iso.py "path/to/your X-Men Destiny.iso" "Game Files"
    ```
 6. Put a **program icon** at `port\res\xmd.ico` (any `.ico`; see `port/res/README.md`).
+   Then make the **button-prompt pictures**: run `python port/tools/make_glyphs.py` (needs Pillow). It draws them from plain shapes and the Roboto font in the SDK's source and writes `port\res\glyphs.bin`.
 7. **Generate** the C++ code from your `Default.xex`:
    ```bash
    cd port && ../recomp/sdk/win-amd64/bin/rexglue.exe codegen xmd_manifest.toml
