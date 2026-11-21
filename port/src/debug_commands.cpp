@@ -46,6 +46,7 @@
 
 #include "capture.h"
 #include "debug_commands.h"
+#include "controls.h"
 #include "mod_menu.h"
 #include "generated/default/xmd_init.h"
 
@@ -140,6 +141,7 @@ void ParseLine(const std::string& line) {
     REXLOG_INFO("debug command: set {} = {}{}", name, value, ok ? "" : " (no such setting, or not that value)");
   } else if (verb == "flag") {
     Queue("SetGameFlag(\"" + rest + "\")");
+  } else if (xmd::controls::Command(verb, rest)) {  // ("controls ...", "cam ...": controls.h)
   } else if (!xmd::modmenu::Command(verb, rest)) {  // ("mod ...": the mod menu's functions, mod_menu.h)
     REXLOG_WARN("debug command: unknown '{}'", line);
   }

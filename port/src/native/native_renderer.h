@@ -39,6 +39,9 @@ bool Enabled();
 // The game draws only with it (no emulated fallback): the overlay shows this
 // over a black screen (fps_overlay.cpp).
 std::string FailureReason();
+// Called once (any thread) with the reason when the native renderer can't start or stops and the emulated
+// renderer takes over.
+void SetFailureNotice(std::function<void(const std::string&)> notice);
 
 // Main mode: switch between this renderer and the emulated one while the
 // game runs (the GRAPHICS page). CanSwitch: started as the main renderer

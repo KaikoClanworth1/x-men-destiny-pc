@@ -19,6 +19,12 @@
 //                               (written by the recorder: XMD_RECORD_FILE, tools\record_play.ps1)
 //   sync <text>                 the recorder's "until": the line may also have come since the sync before it
 //   clear                       drop everything still queued and the step under way
+//   key <keys> [ms]             hold keyboard keys / mouse buttons (default 120 ms), then release - names as in
+//                               the key settings (W, Space, Shift, Escape, LMB, RMB ...), joined with '+'
+//   keyuntil <keys> <text>      "pressuntil" with keys (<keys>/<keys>: the two in turn)
+//   mouse <dx> <dy> <ms> [keys] move the mouse by dx,dy counts in all, spread evenly over ms (keys held meanwhile)
+//                               (both go to the game's own keyboard-and-mouse driver in its test mode: the real
+//                               keyboard, mouse and cursor are never read or touched)
 //
 // <buttons> is one or more of A B X Y START BACK LB RB LS RS UP DOWN LEFT RIGHT
 // joined with '+'. Lines starting with '#' are ignored.
@@ -78,11 +84,17 @@ class ScriptInputDriver final : public rex::input::InputDriver {
     enum Kind : uint8_t { kPlain, kUntil, kPressUntil } kind = kPlain;
     std::string arg;  // the text an until step waits for
     bool sync = false;  // ("sync": an until whose line may have come while the steps before it played)
+    std::vector<uint16_t> keys;   // ("key" / "mouse": virtual keys held while the step runs)
+    std::vector<uint16_t> until_keys, other_keys;  // ("keyuntil": pressed in turn every 1.5 s)
+    float mouse_dx = 0, mouse_dy = 0;  // ("mouse": the whole movement of the step)
   };
 
   void PollFile();
   void ParseLine(const std::string& line);
   Step CurrentStep();
+  void BeginStep(Clock::time_point now);
+  void MouseTick(Clock::time_point now);
+  void EndStep(Clock::time_point now);
 
   std::filesystem::path file_;
   std::mutex mutex_;
@@ -93,6 +105,9 @@ class ScriptInputDriver final : public rex::input::InputDriver {
   uint32_t packet_ = 0;
   Clock::time_point pad_base_{};
   bool pad_base_set_ = false;
+  Clock::time_point step_begin_{}, mouse_at_{};
+  bool until_keys_down_ = false;
+  std::vector<uint16_t> until_keys_held_;
 };
 
 }  // namespace xmd

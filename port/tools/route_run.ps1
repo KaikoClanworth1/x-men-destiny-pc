@@ -18,6 +18,9 @@ if ($Native) {
     # (the renderer's own screenshot: tools\gshot.ps1)
     $env:XMD_TEST_SHOT_REQUEST = Join-Path $port 'runs\shot_request.txt'
     $Extra += '--native_renderer=main', "--gpu_backend=$Api", "--native_max_scale=$Scale"
+} elseif (-not ($Extra -match 'native_renderer')) {
+    # (the game's own default is the native renderer since 2026-11-21: without -Native a test asks for the emulated one)
+    $Extra += '--native_renderer=off'
 }
 # (the emulated GPU's frame dump: create runs\gpu_dump_now.txt -> runs\gpu_draws.txt)
 $env:XMD_GPU_DUMP_TRIGGER = Join-Path $port 'runs\gpu_dump_now.txt'; $env:XMD_GPU_DUMP_FILE = Join-Path $port 'runs\gpu_draws.txt'

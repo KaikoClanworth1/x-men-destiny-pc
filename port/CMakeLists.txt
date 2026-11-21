@@ -27,6 +27,7 @@ set(XMD_SOURCES
     src/mod_menu.cpp
     src/pc_menu.cpp
     src/menu_patch.cpp
+    src/controls.cpp
 )
 # The program's icon (res/xmd.ico: the game's own title image).
 if(WIN32)

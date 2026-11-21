@@ -1,4 +1,4 @@
-﻿// X-Men: Destiny - scripted controller (see script_input.h).
+// X-Men: Destiny - scripted controller (see script_input.h).
 
 #include "script_input.h"
 
@@ -11,6 +11,8 @@
 #include <thread>
 
 #include <rex/input/input_system.h>
+#include <rex/input/mnk/mnk_input_driver.h>
+#include <rex/ui/keybinds.h>
 #include <rex/logging.h>
 #include <spdlog/sinks/base_sink.h>
 
@@ -51,6 +53,21 @@ uint16_t ParseButtons(const std::string& spec) {
     if (!found) REXLOG_WARN("script input: unknown button '{}'", name);
   }
   return bits;
+}
+
+// "key" / "mouse": key names joined with '+', as the key settings spell them.
+std::vector<uint16_t> ParseKeys(const std::string& spec) {
+  std::vector<uint16_t> keys;
+  std::istringstream in(spec);
+  for (std::string name; std::getline(in, name, '+');) {
+    const rex::ui::VirtualKey key = rex::ui::ParseVirtualKey(name == "Ctrl" ? "Control" : name);
+    if (key == rex::ui::VirtualKey::kNone) {
+      REXLOG_WARN("script input: unknown key '{}'", name);
+    } else {
+      keys.push_back(static_cast<uint16_t>(key));
+    }
+  }
+  return keys;
 }
 
 // "until": the text a step waits for in the log, and whether it has come.
@@ -217,7 +234,25 @@ void ScriptInputDriver::ParseLine(const std::string& line) {
     (side == "R" || side == "r" ? step.right_trigger : step.left_trigger) =
         static_cast<uint8_t>(std::clamp(v, 0, 255));
     queue_.push_back(step);
+  } else if (verb == "key") {
+    std::string keys;
+    in >> keys;
+    step.keys = ParseKeys(keys);
+    step.ms = 120;
+    in >> step.ms;
+    queue_.push_back(step);
+    queue_.push_back(Step{.ms = 120});  // released, so repeated presses register
+  } else if (verb == "mouse") {
+    in >> step.mouse_dx >> step.mouse_dy >> step.ms;
+    std::string keys;
+    if (in >> keys) step.keys = ParseKeys(keys);
+    queue_.push_back(step);
   } else if (verb == "clear") {
+    EndStep(Clock::now());
+    if (until_keys_down_) {
+      for (uint16_t key : until_keys_held_) rex::input::mnk::TestInjectKey(key, false);
+      until_keys_down_ = false;
+    }
     // (drops everything queued and the step under way: a boot route's "pressuntil" still waiting for a line
     // that came early would keep pressing its button in the level, ahead of whatever is appended)
     queue_.clear();
@@ -248,6 +283,17 @@ void ScriptInputDriver::ParseLine(const std::string& line) {
       std::lock_guard until(g_until_mutex);
       if (g_sync_text.empty()) g_sync_text = step.arg, g_sync_hit = false;
     }
+    queue_.push_back(step);
+  } else if (verb == "keyuntil") {  // (pressuntil with keyboard keys: <keys>[/<keys>] <text>)
+    std::string keys;
+    in >> keys;
+    step.kind = Step::kPressUntil;
+    if (const size_t slash = keys.find('/'); slash != std::string::npos) {
+      step.other_keys = ParseKeys(keys.substr(slash + 1));
+      keys.resize(slash);
+    }
+    step.until_keys = ParseKeys(keys);
+    step.arg = rest_of_line();
     queue_.push_back(step);
   } else if (verb == "pressuntil") {
     std::string buttons;
@@ -305,6 +351,29 @@ void ScriptInputDriver::PollFile() {
   }
 }
 
+void ScriptInputDriver::BeginStep(Clock::time_point now) {
+  step_begin_ = mouse_at_ = now;
+  for (uint16_t key : current_.keys) rex::input::mnk::TestInjectKey(key, true);
+}
+
+// The part of a "mouse" step's movement that belongs to the time since the last pad read.
+void ScriptInputDriver::MouseTick(Clock::time_point now) {
+  if ((current_.mouse_dx == 0 && current_.mouse_dy == 0) || current_.ms <= 0) return;
+  const auto until = std::min(now, step_end_);
+  if (until <= mouse_at_) return;
+  const float part = std::chrono::duration<float, std::milli>(until - mouse_at_).count() / float(current_.ms);
+  rex::input::mnk::TestInjectMouse(current_.mouse_dx * part, current_.mouse_dy * part);
+  mouse_at_ = until;
+}
+
+void ScriptInputDriver::EndStep(Clock::time_point now) {
+  if (!running_) return;
+  MouseTick(now);
+  for (uint16_t key : current_.keys) rex::input::mnk::TestInjectKey(key, false);
+  current_.keys.clear();
+  current_.mouse_dx = current_.mouse_dy = 0;
+}
+
 ScriptInputDriver::Step ScriptInputDriver::CurrentStep() {
   std::lock_guard lock(mutex_);
   PollFile();
@@ -320,10 +389,22 @@ ScriptInputDriver::Step ScriptInputDriver::CurrentStep() {
             press_end_ = now + std::chrono::milliseconds(120);
             next_press_ = now + std::chrono::milliseconds(1500);
             if (current_.other_buttons) std::swap(current_.buttons, current_.other_buttons);
+            if (!current_.other_keys.empty()) std::swap(current_.until_keys, current_.other_keys);
           }
           if (now < press_end_) out.buttons = current_.buttons;
+          // ("keyuntil": the keys down for the press, up between presses)
+          const bool down = now < press_end_;
+          if (down != until_keys_down_) {
+            if (down) until_keys_held_ = current_.until_keys;
+            for (uint16_t key : until_keys_held_) rex::input::mnk::TestInjectKey(key, down);
+            until_keys_down_ = down;
+          }
         }
         return out;
+      }
+      if (until_keys_down_) {
+        for (uint16_t key : until_keys_held_) rex::input::mnk::TestInjectKey(key, false);
+        until_keys_down_ = false;
       }
       if (hit) {
         REXLOG_INFO("script input: until \"{}\": seen after {:.1f} s", current_.arg, waited);
@@ -337,7 +418,11 @@ ScriptInputDriver::Step ScriptInputDriver::CurrentStep() {
       running_ = false;
       current_ = Step{};
     }
-    if (running_ && now < step_end_) return current_;
+    if (running_ && now < step_end_) {
+      MouseTick(now);
+      return current_;
+    }
+    EndStep(now);
     running_ = !queue_.empty();
     if (!running_) {
       current_ = Step{};
@@ -346,6 +431,7 @@ ScriptInputDriver::Step ScriptInputDriver::CurrentStep() {
     current_ = queue_.front();
     queue_.pop_front();
     step_end_ = now + std::chrono::milliseconds(current_.ms);
+    BeginStep(now);
     if (current_.end_at >= 0) {
       if (!pad_base_set_) pad_base_ = now, pad_base_set_ = true;
       step_end_ = pad_base_ + std::chrono::milliseconds(current_.end_at);

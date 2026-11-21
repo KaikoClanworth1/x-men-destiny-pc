@@ -46,7 +46,7 @@ All pictures are of this port running.
 - ✅ **PC options in the game's own menu**: *Options → Graphics*, and *Exit* on the main menu.
 - ✅ **Mod menu**: cheats, warps to the game's checkpoints, cut-scenes, game speed.
 
-**Not there yet:** keyboard and mouse play, controller remapping, button prompts for other controllers, and a steady frame rate above the console's 30 fps. Some picture faults remain (shadows, flicker on a few effects). The full list is in [docs/STATUS.md](docs/STATUS.md).
+**Not there yet:** controller remapping, button prompts for other controllers, and a steady frame rate above the console's 30 fps. Some picture faults remain (shadows, flicker on a few effects). Keyboard and mouse play comes with the next release. The full list is in [docs/STATUS.md](docs/STATUS.md).
 
 ---
 

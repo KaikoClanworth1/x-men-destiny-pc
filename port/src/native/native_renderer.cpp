@@ -178,11 +178,13 @@ REXCVAR_DEFINE_STRING(native_texture_quality, "high", "GPU",
                       "a sixteenth of the memory and upload); menus, fonts and pictures stay sharp")
     .allowed({"high", "medium", "low"});
 
-REXCVAR_DEFINE_STRING(native_renderer, "off", "GPU",
-                      "Native renderer: main - the game's own Direct3D calls are drawn natively (the emulator only "
-                      "runs the GPU command stream); off - the emulated Xbox GPU draws (the default while the "
-                      "native renderer is being brought up for this game).")
-    .allowed({"off", "main", "shadow"})
+REXCVAR_DEFINE_STRING(native_renderer, "auto", "GPU",
+                      "Renderer: auto (the default) - the native renderer draws the game's own Direct3D calls "
+                      "(the emulator only runs the GPU command stream) on Direct3D 12, and the emulated Xbox GPU "
+                      "takes over where it can't start (another graphics API, its prepared shaders missing) or "
+                      "stops; main - the native renderer on any API; off - the emulated Xbox GPU draws (the "
+                      "reference to compare with).")
+    .allowed({"auto", "off", "main", "shadow"})
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 
 namespace texture_util = rex::graphics::texture_util;
@@ -1253,16 +1255,23 @@ std::function<std::pair<uint32_t, uint32_t>()> g_window_size;
 // with it - no emulated fallback: the screen stays black with the reason on
 // it (FailureReason, fps_overlay.cpp), and on Android the launcher shows it
 // next time (native_failed.txt in the app's cache).
+// [xmd] Here the emulated renderer takes over (it is this game's first renderer and still complete): the
+// emulated GPU, which kept running the command stream, draws again from its next frame and its own picture is
+// shown - never a black window. The window's title says so (g_failure_notice: xmd_app.cpp).
 std::mutex g_fail_mutex;
 std::string g_fail_reason;
+std::function<void(const std::string&)> g_failure_notice;
 
 void Fail(const char* reason = "it stopped working") {
+  const bool first = !g_failed;
   g_failed = true;
   {
     std::lock_guard lock(g_fail_mutex);
     if (g_fail_reason.empty()) g_fail_reason = reason;
   }
-  REXLOG_ERROR("native renderer: can't draw the game - {} (no emulated fallback)", reason);
+  rex::external_frame::SetHostDrawingDisabled(false);
+  REXLOG_ERROR("native renderer: can't draw the game - {} - the emulated renderer draws from here on", reason);
+  if (first && g_failure_notice) g_failure_notice(reason);
 #if defined(__ANDROID__)
   if (const char* cache = std::getenv("XMD_CACHE_DIR")) {
     if (FILE* f = std::fopen((std::string(cache) + "/native_failed.txt").c_str(), "w")) {
@@ -1993,6 +2002,14 @@ bool Initialize() {
   // Without its converted shaders (native_shaders\ beside the exe, installed
   // by the launcher) nothing could be drawn: a black screen. Let the emulated
   // renderer draw instead.
+  // [xmd] native_renderer = "auto" (the default): only on Direct3D 12, the one API this game's native renderer
+  // has been run and checked on. Where the runtime picked another (a GPU without Direct3D 12), the emulated
+  // renderer draws; "main" in the settings tries the native one there all the same.
+  if (REXCVAR_GET(native_renderer) == "auto" && backend::ActiveApi() != backend::Api::kD3D12) {
+    Fail("it has only been checked on Direct3D 12 and this PC draws with another API (native_renderer = \"main\" "
+         "in xmd.toml tries it anyway)");
+    return true;
+  }
   {
     std::error_code ec;
     if (!ShaderExists("present.vs")) {
@@ -5985,13 +6002,15 @@ FrameCosts LastFrameCosts() {
 }
 
 std::string RendererLabel() {
-  if (g_failed) return "Native - stopped";
+  if (g_failed) return "Emulated (the native renderer stopped)";
   if (!g_main) return "Native - starting";
   return fmt::format("Native {}x", g_scale);
 }
 
-// (always: the game draws only with the native renderer)
-bool Enabled() { return g_main; }
+// (attached and working: after a failure the hooks only pass the calls on and the emulated renderer draws)
+bool Enabled() { return g_main && !g_failed; }
+
+void SetFailureNotice(std::function<void(const std::string&)> notice) { g_failure_notice = std::move(notice); }
 
 // No switching to the emulated renderer any more.
 bool CanSwitch() { return false; }
@@ -6146,7 +6165,7 @@ void Attach(rex::memory::Memory* memory) {
       if (g_failed || g_suspended) return false;
       return backend::GetFrame(f);
     });
-    REXLOG_INFO("native renderer: main renderer at {}x resolution (the only one: no emulated fallback)", g_scale);
+    REXLOG_INFO("native renderer: main renderer (the emulated one takes over if it can't start or stops)");
   }
 }
 

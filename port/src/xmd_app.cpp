@@ -4,6 +4,7 @@
 
 #include "xmd_app.h"
 #include "script_input.h"
+#include "controls.h"
 #include "crash_report.h"
 #include "capture.h"
 #include "debug_commands.h"
@@ -25,6 +26,7 @@
 #include <rex/cvar.h>
 #include <rex/filesystem.h>
 #include <rex/input/input_system.h>
+#include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/logging.h>
 
 #if defined(_WIN32)
@@ -95,6 +97,7 @@ void XmdApp::OnPreSetup(rex::RuntimeConfig& config) {
   if (!Env("XMD_AUDIO_MUTE").empty()) {
     rex::cvar::SetFlagByName("audio_mute", "true");
   }
+  xmd::controls::Configure();  // (keyboard and mouse on, with this game's layout: controls.h)
   // Automated tests: the only controller is one driven by a command file.
   if (std::string file = Env("XMD_INPUT_FILE"); !file.empty()) {
     xmd::InstallScriptLogSink();  // (now: logging is up, no game thread yet)
@@ -103,6 +106,9 @@ void XmdApp::OnPreSetup(rex::RuntimeConfig& config) {
       auto driver = std::make_unique<xmd::ScriptInputDriver>(file);
       driver->Setup();
       input->AddDriver(std::move(driver));
+      // (the script's "key" and "mouse" lines: the keyboard-and-mouse driver in its test mode - it reads no real device)
+      rex::input::mnk::SetTestMode(true);
+      input->AddDriver(std::make_unique<rex::input::mnk::MnkInputDriver>(nullptr, 0));
       input->SetDeviceAssignment(std::make_unique<rex::input::SharedAssignment>());
       return input;
     };
@@ -177,7 +183,15 @@ void XmdApp::AttachNativeRenderer() {
   // The native renderer (setting native_renderer = "main"; "off": the SDK's
   // emulated Xbox GPU draws). It reads the game's vertex and texture data
   // where the game put it.
-  if (rex::cvar::Query<std::string>("native_renderer") == "main") {
+  // ("auto", the default, and "main": xmd::native decides - and hands over to the emulated renderer, with the
+  // reason in the window's title, when it can't start or stops)
+  if (const std::string mode = rex::cvar::Query<std::string>("native_renderer"); mode == "main" || mode == "auto") {
+    xmd::native::SetFailureNotice([this](const std::string& reason) {
+      app_context().CallInUIThread([this, reason] {
+        if (rex::ui::Window* w = window())
+          w->SetTitle("X-Men Destiny - emulated renderer (the native renderer can't draw: " + reason + ")");
+      });
+    });
     xmd::native::Attach(runtime()->memory());
     if (rex::ui::Window* w = window()) {
       xmd::native::SetWindowSizeSource([w] {
@@ -200,6 +214,7 @@ void XmdApp::OnPostLoadXexImage() {
         });
       },
       [this](std::function<void()> f) { app_context().CallInUIThread(std::move(f)); }, g_config_file);
+  xmd::controls::Install(runtime()->virtual_membase(), [this] { return InteractiveOverlayOpen(); });
   // Tests: XMD_DEBUG_FILE=<file>, lines run as Lua in the game's script state (debug_commands.cpp).
   // (without one: still there for the port's own questions to the scripts - an F4 capture's "where")
   xmd::debug::Install(Env("XMD_DEBUG_FILE"), runtime()->memory()->SystemHeapAlloc(xmd::debug::ScratchSize()));

@@ -1,0 +1,26 @@
+# Keyboard only: from boot into the first level (route_level.txt with keys: Escape = START, Return = A, Tab = BACK).
+keyuntil Escape (00000000, 00000000)
+wait 1500
+keyuntil Escape (00000000, 00000000)
+wait 1500
+keyuntil Return MainMenuIntroActivated
+wait 5000
+key Return 200
+wait 2500
+key Return 200
+wait 2500
+key Return 200
+keyuntil Return OnCharacterSelection
+wait 2000
+key Return 200
+# (the opening cut-scenes: START skips one where it can)
+keyuntil Escape/Return IntroComplete
+wait 4000
+key Return 200
+keyuntil Escape/Return ShowHudComplete
+# (in the level: the tutorial box closes with BACK)
+wait 3000
+key Tab 200
+wait 2500
+key Tab 200
+wait 2000
