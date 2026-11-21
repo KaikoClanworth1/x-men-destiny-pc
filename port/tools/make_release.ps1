@@ -136,7 +136,18 @@ foreach ($o in $portObjs) {
 # the port's own icon for xmd.exe (drawn by setup\tools\make_icon.ps1: nothing from the game)
 $ico = Join-Path $sb "setup.ico"
 Copy-Item $ico (Join-Path $sb "xmd.ico") -Force
-Set-Content (Join-Path $sb "xmd_icon.rc") '1 ICON "xmd.ico"' -Encoding ascii
+$rcLines = @('1 ICON "xmd.ico"')
+# the button-prompt pictures (port\res\glyphs.bin, drawn by tools\make_glyphs.py from shapes and a free font: nothing
+# from the game), resource 2 like in port\res\xmd.rc - src\pad_icons.cpp reads them from the exe
+$glyphs = Join-Path $srcRoot "port\res\glyphs.bin"
+if ((Get-Content (Join-Path $srcRoot "port\res\xmd.rc") -Raw) -match 'glyphs\.bin') {
+    if (-not (Test-Path $glyphs)) { throw "port\res\glyphs.bin is missing: run port\tools\make_glyphs.py" }
+    $head = [byte[]]::new(4); $fs = [IO.File]::OpenRead($glyphs); [void]$fs.Read($head, 0, 4); $fs.Close()
+    if ([Text.Encoding]::ASCII.GetString($head) -ne "XMDG") { throw "port\res\glyphs.bin is not a glyph file" }
+    Copy-Item $glyphs (Join-Path $sb "glyphs.bin") -Force
+    $rcLines += '2 RCDATA "glyphs.bin"'
+}
+Set-Content (Join-Path $sb "xmd_icon.rc") $rcLines -Encoding ascii
 & llvm-rc /fo (Join-Path $out "sdk\obj\xmd_icon.res") (Join-Path $sb "xmd_icon.rc") | Out-Null
 if ($LASTEXITCODE) { throw "llvm-rc failed" }
 foreach ($l in "rexruntime.lib", "spdlog.lib", "fmt.lib", "SDL3-static.lib") { Copy-Item (Join-Path $sdkOut $l) (Join-Path $out "sdk\lib") }
@@ -192,6 +203,9 @@ $lic = [ordered]@{
     "DirectX Shader Compiler (NCSA / LLVM; dxc.exe, dxcompiler.dll, dxil.dll by Microsoft)" = (Join-Path $port "setup\licenses\DirectXShaderCompiler.txt")   # (its text is not in the dxc-bin folder: kept beside the setup's sources)
     "Python (PSF licence; sdk\shadertools\python)"   = (Join-Path $st "python\LICENSE.txt")
 }
+# (optional: the font the button-prompt pictures were drawn with; included once its text is beside the setup's sources)
+$roboto = Join-Path $port "setup\licenses\Roboto.txt"
+if (Test-Path $roboto) { $lic["Roboto (Apache-2.0; the font the button-prompt pictures are drawn with)"] = $roboto }
 $notice = @("X-Men Destiny PC port - third-party software in this package", "", "The full licence texts are in the licenses folder.", "")
 foreach ($k in $lic.Keys) {
     $f = $lic[$k]
