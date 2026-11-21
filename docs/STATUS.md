@@ -21,7 +21,7 @@ The port has four goals. This page is kept up to date as the work goes on.
 
 ## What doesn't yet
 
-- **The native renderer is still switched off by default**, so an installed game draws with the emulated renderer unless you turn it on. The setup does prepare the native renderer's shaders now.
+- **In v0.1.0 the native renderer is switched off by default**, so that release draws with the emulated renderer unless you turn it on. From the next release it is the default on Direct3D 12, and the emulated renderer takes over by itself (the window title says why) when the native one can't start or its prepared shaders are missing.
 - **Direct3D 11 and Vulkan** renderers exist but aren't finished.
 - **Picture faults** in the native renderer: some shadow artefacts, flicker on some particle effects, objects appearing late.
 - **Sound decoding** still goes through the SDK's emulated XMA decoder (FFmpeg). There is no PC volume setting yet.
