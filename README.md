@@ -42,11 +42,12 @@ All pictures are of this port running.
 
 - ✅ **The game starts and plays**: movies, menus, cut-scenes and missions. Not every mission has been played through yet.
 - ✅ **Sharper picture**: higher resolutions than the console's 720p, anti-aliasing and better texture filtering.
-- ✅ **Controllers**: Xbox, PlayStation, Switch Pro and others.
+- ✅ **Controllers**: Xbox, PlayStation, Switch Pro and others, with button prompts that match yours.
+- ✅ **Keyboard and mouse**, with remapping through a settings file. Tested with scripted input only so far.
 - ✅ **PC options in the game's own menu**: *Options → Graphics*, and *Exit* on the main menu.
 - ✅ **Mod menu**: cheats, warps to the game's checkpoints, cut-scenes, game speed.
 
-**Not there yet:** a remap page in the menu, and a steady frame rate above the console's 30 fps. Some picture faults remain (shadows, flicker on a few effects). Keyboard and mouse play, remapping and button prompts for your own controller come with the next release. The full list is in [docs/STATUS.md](docs/STATUS.md).
+**Not there yet:** a remap page in the menu, and a steady frame rate above the console's 30 fps. Some picture faults remain (shadows, flicker on a few effects). The full list is in [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
@@ -56,7 +57,7 @@ All pictures are of this port running.
 
 - Your own *X-Men: Destiny* **Xbox 360** game, as a disc image (`.iso`) or as a folder of its files. The setup checks it and tells you if it's a version it doesn't know.
 - Windows 10 or 11 (64-bit), a graphics card with Direct3D 12, and about **9 GB** of free space.
-- A controller.
+- A controller, or keyboard and mouse.
 
 **Steps**
 
@@ -85,7 +86,9 @@ Your saves and settings are kept in the `UserData` folder inside the game folder
 
 ## Keys
 
-The game plays with a controller, laid out as on the Xbox 360. The port adds these keys:
+The game plays with a controller, laid out as on the Xbox 360, or with keyboard and mouse: WASD to move, mouse for the camera, left / right mouse button for light / heavy attack, Space to jump, Shift to dodge, Q to block, R for X-Mode, E for PowerShift, Escape to pause. To change keys or buttons, edit `controls.toml` in the game folder.
+
+The port also adds these keys:
 
 | Key | What it does |
 |---|---|
@@ -121,7 +124,7 @@ It imports:
 
 **Install**
 
-1. Download [`io_xmd-0.1.0.zip`](../../releases/download/v0.1.0/io_xmd-0.1.0.zip). Don't unzip it.
+1. Download [`io_xmd-0.1.0.zip`](../../releases/download/v0.1.1/io_xmd-0.1.0.zip). Don't unzip it.
 2. In Blender: *Edit → Preferences → Get Extensions*, the arrow at the top right, *Install from Disk…*, and pick the zip.
 3. Use *File → Import → X-Men: Destiny model / animations / map* and point it at the folder with the game's `*.zzz.gz` files. After installing the port that is the `Game Files` folder.
 

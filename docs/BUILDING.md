@@ -58,7 +58,7 @@ Run them from the repository root.
    ```bash
    powershell -ExecutionPolicy Bypass -File port/build.ps1 -Deploy
    ```
-9. Optionally, the **native renderer's shaders**. They're converted from the game's own shaders on your disc with [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) (commit `990d03b`, with `port/patches/xenosrecomp-xmd.patch`, built in `recomp\XenosRecomp`): run `port/tools/find_shaders.py`, then `port/tools/convert_shaders.py`. Without them the game uses the emulated renderer.
+9. The **native renderer's shaders**. They're converted from the game's own shaders on your disc with [XenosRecomp](https://github.com/hedge-dev/XenosRecomp) (commit `990d03b`, with `port/patches/xenosrecomp-xmd.patch`, built in `recomp\XenosRecomp`): run `port/tools/find_shaders.py`, then `port/tools/convert_shaders.py`. The native renderer is the default; without these shaders the game falls back to the emulated renderer and says so in the window title.
 
 Then start `Game Files\xmd.exe`. Saves, settings, captures and logs go to `Game Files\UserData\`.
 
