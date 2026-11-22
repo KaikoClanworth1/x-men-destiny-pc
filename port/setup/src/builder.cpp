@@ -309,7 +309,9 @@ std::string RunShaderTool(const Paths& p, int jobs, Progress& prog, const std::v
 // after three minutes. Returns how many shaders are waiting to be converted.
 std::vector<wchar_t> CurrentEnvironment();
 
-int CollectStartupShaders(const Paths& p, Progress& prog, const std::vector<wchar_t>& env) {
+// `ran`: the game kept running until this ended it (false: it could not start, or ended by itself - a failed start).
+int CollectStartupShaders(const Paths& p, Progress& prog, const std::vector<wchar_t>& env, bool& ran) {
+    ran = false;
     std::error_code ec;
     const fs::path exe = p.install_dir / "xmd.exe";
     // (this program's own environment, as when the player starts the game - not the C++ tools')
@@ -368,6 +370,7 @@ int CollectStartupShaders(const Paths& p, Progress& prog, const std::vector<wcha
         const double quiet = std::chrono::duration<double>(now - last_new).count();
         prog.fraction = 0.86f + 0.07f * float(std::min(1.0, secs / 60.0));
         if (prog.cancel || secs > 180 || (count > before && quiet > 20) || (count == before && secs > 90)) {
+            ran = true;
             TerminateProcess(pi.hProcess, 0);
             WaitForSingleObject(pi.hProcess, 10000);
             break;
@@ -804,13 +807,18 @@ int BuildGame(const Paths& p, int jobs, Progress& prog) {
             note("starting the game once, silent and out of sight, to collect the shaders it makes itself");
             // (the game's start can fail by itself: seen here as an assert three seconds in, several times in a row,
             // then not at all - so up to three tries)
+            // (a start that ran its whole time and saved none had every shader already - an update or repair, where
+            // the ones collected the first time are still in the build folder: no second try then)
             int saved = 0;
-            for (int attempt = 1; attempt <= 3 && saved == 0 && !prog.cancel; attempt++) {
-                saved = CollectStartupShaders(p, prog, env);
+            bool ran = false;
+            for (int attempt = 1; attempt <= 3 && saved == 0 && !ran && !prog.cancel; attempt++) {
+                saved = CollectStartupShaders(p, prog, env, ran);
                 note(Format("the game saved %d shaders (start %d)", saved, attempt));
             }
             if (saved > 0 && !prog.cancel)
                 why = RunShaderTool(p, jobs, prog, env, 0.93f, 1.0f);
+            else if (saved == 0 && ran)
+                note("none saved: the game had every shader it asked for");
             else if (saved == 0)
                 note("none saved: the launcher converts them before a later start instead");
         }
