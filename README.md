@@ -125,7 +125,7 @@ It imports:
 2. In Blender: *Edit → Preferences → Get Extensions*, the arrow at the top right, *Install from Disk…*, and pick the zip.
 3. Use *File → Import → X-Men: Destiny model / animations / map* and point it at the folder with the game's `*.zzz.gz` files. After installing the port that is the `Game Files` folder.
 
-Written for and tested with **Blender 5.2**. It allows 4.2 and later, but older versions weren't tried. Import only. Materials are an approximation of the game's shaders, and there are no lights. The `README.md` inside the zip has the full guide and the list of gaps.
+Written for and tested with **Blender 5.2**. It allows 4.2 and later, but older versions weren't tried. Import only. Materials are an approximation of the game's shaders, and there are no lights. The full guide and the list of gaps are in [blender_plugin/README.md](blender_plugin/README.md); its source and notes on the game's file formats are in the same folder.
 
 ---
 

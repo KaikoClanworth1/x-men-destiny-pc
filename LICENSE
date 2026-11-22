@@ -26,7 +26,7 @@ What this licence covers
 ------------------------
 
 It covers the port's own work in this repository: the game hooks, menus, mod
-menu and native renderer (port/src), the tools (port/tools) and the
+menu and native renderer (port/src), the tools (port/tools), the Blender add-on (blender_plugin) and the
 documentation.
 
 It does NOT cover:

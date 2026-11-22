@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+
+id = "io_xmd"
+version = "0.1.0"
+name = "X-Men: Destiny (Xbox 360) importer"
+tagline = "Import models, animations and maps from your own copy of the game"
+maintainer = "KaikoClanworth"
+type = "add-on"
+blender_version_min = "4.2.0"
+license = ["SPDX:MIT"]
+tags = ["Import-Export"]
+
+[permissions]
+files = "Reads the game's archives from the folder you choose"

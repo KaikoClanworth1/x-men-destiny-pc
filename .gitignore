@@ -10,6 +10,7 @@
 !/recomplauncher.json
 !/docs/
 !/port/
+!/blender_plugin/
 
 # Inside port/: generated game code, builds, installers, test runs, captures
 /port/generated/
