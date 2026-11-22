@@ -109,6 +109,26 @@ Please don't attach the `state` folder from a capture: it holds the game's own d
 
 ---
 
+## Blender add-on
+
+A separate download for people who want to look at the game's models: an importer for [Blender](https://www.blender.org/) that reads the archives of **your own copy** of the game. It contains no game data.
+
+It imports:
+
+- **Models**: characters and props with mesh, skeleton, skin weights and materials. Textures are found in the game folder by themselves.
+- **Animations**, as actions on an imported skeleton.
+- **Maps**: a level's static models, placed as in the game.
+
+**Install**
+
+1. Download [`io_xmd-0.1.0.zip`](../../releases/download/v0.1.0/io_xmd-0.1.0.zip). Don't unzip it.
+2. In Blender: *Edit → Preferences → Get Extensions*, the arrow at the top right, *Install from Disk…*, and pick the zip.
+3. Use *File → Import → X-Men: Destiny model / animations / map* and point it at the folder with the game's `*.zzz.gz` files. After installing the port that is the `Game Files` folder.
+
+Written for and tested with **Blender 5.2**. It allows 4.2 and later, but older versions weren't tried. Import only. Materials are an approximation of the game's shaders, and there are no lights. The `README.md` inside the zip has the full guide and the list of gaps.
+
+---
+
 ## More
 
 - [State of the port](docs/STATUS.md): what works, what doesn't, what's next.
