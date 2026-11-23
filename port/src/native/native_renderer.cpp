@@ -1144,6 +1144,11 @@ uint32_t g_scale = 1;
 // the frame images can't be made above 1x.
 uint32_t g_memory_scale_cap = UINT32_MAX;
 uint64_t g_memory_report_frame = ~0ull;  // (BeginFrame logs the video memory in use at this frame)
+// [xmd] Skinned draws (characters) since the last "native draws per frame" line, and those whose bone rows could
+// not be made (IndexedRows), by reason: no element / no stream buffer / offset past the buffer / memory not
+// readable / upload ring full. A report "no character models" (v0.1.1, an AMD handheld, no log attached) could
+// not be told apart from missing shaders without these.
+uint64_t g_skin_draws = 0, g_skin_no_rows[5] = {};
 // native_scale_effects off: only the main scene's targets (and their resolves
 // and the frame images) are scaled; the effect buffers (the 1120 x 1120 shadow
 // map, reflections, glow and blur chains) keep the guest's size.
@@ -2615,6 +2620,14 @@ void UpdateTitle(Renderer* r) {
                 fate.draws / double(r->perf_frames), fate.drawn / double(r->perf_frames),
                 fate.skipped_target / double(r->perf_frames), fate.skipped_shader / double(r->perf_frames),
                 fate.skipped_prim / double(r->perf_frames), fate.resolves / double(r->perf_frames));
+    if (g_skin_draws) {
+      REXLOG_INFO("native skinned draws per frame: {:.1f}; without bone rows: {} no element, {} no buffer, {} offset "
+                  "past the buffer, {} memory not readable, {} upload ring full (in {} frames)",
+                  g_skin_draws / double(r->perf_frames), g_skin_no_rows[0], g_skin_no_rows[1], g_skin_no_rows[2],
+                  g_skin_no_rows[3], g_skin_no_rows[4], r->perf_frames);
+      g_skin_draws = 0;
+      for (uint64_t& n : g_skin_no_rows) n = 0;
+    }
     fate = Stats();
     if (g_draw_times) {
       const double n = double(r->perf_frames);
@@ -4828,6 +4841,7 @@ RenderBufferReference IndexedRows(Renderer* r, const Shader* vs, const std::vect
   const uint32_t per_entry = uint32_t(vs->indexed.size());
   const Element* elements[8] = {};
   if (!per_entry || per_entry > 8) return {};
+  ++g_skin_draws;
   for (uint32_t k = 0; k < per_entry; ++k) {
     for (const Element& e : decl) {
       if (e.usage < std::size(kUsageNames) && vs->indexed[k].first == kUsageNames[e.usage] &&
@@ -4839,20 +4853,21 @@ RenderBufferReference IndexedRows(Renderer* r, const Shader* vs, const std::vect
       if (logged++ < 8)
         REXLOG_WARN("native renderer: shader {:016X} fetches {}{} by index, but its format has no such element",
                     vs->hash, vs->indexed[k].first, vs->indexed[k].second);
+      ++g_skin_no_rows[0];
       return {};
     }
   }
   const Stream& s = g_streams[elements[0]->stream];
-  if (!s.buffer) return {};
+  if (!s.buffer) return ++g_skin_no_rows[1], RenderBufferReference{};
   const uint8_t* vb = BufferObject(s.buffer);
   const uint32_t address = Be32(vb + 0x18) & ~3u, bytes = Be32(vb + 0x1C) & ~3u;
   const uint32_t stride = elements[0]->stride;
-  if (s.offset >= bytes) return {};
+  if (s.offset >= bytes) return ++g_skin_no_rows[2], RenderBufferReference{};
   // (bone numbers are bytes: 256 entries from the stream's offset at most. The game keeps every model's bones
   // in one stream with no size - its buffer object says 16 MB - and sets the offset per draw.)
   uint32_t entries = std::min(std::min((bytes - s.offset) / stride, 256u), (kRows - 1) / per_entry);
   auto [cpu, gpu] = Allocate(r, std::max<uint64_t>(256, uint64_t(1 + entries * per_entry) * 16));
-  if (!cpu) return {};
+  if (!cpu) return ++g_skin_no_rows[4], RenderBufferReference{};
   float scale = 1.0f;
   for (const Element& e : decl)
     if ((e.type & 0x3F) == 6 && (e.type & 0x200)) scale = 255.0f;
@@ -4867,7 +4882,7 @@ RenderBufferReference IndexedRows(Renderer* r, const Shader* vs, const std::vect
       ok += chunk;
     }
     entries = ok / stride;
-    if (!entries) return {};
+    if (!entries) return ++g_skin_no_rows[3], RenderBufferReference{};
   }
   // (the usual case - a bone's rows are float4s one after the other, nothing else in the entry: swapped across)
   bool plain = stride == 16 * per_entry;

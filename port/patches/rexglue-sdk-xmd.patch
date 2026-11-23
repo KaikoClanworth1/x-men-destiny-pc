@@ -2673,7 +2673,7 @@ index 0d8f8af..d90945b 100644
      ${REXGLUE_ROOT}  # For thirdparty/dxbc/DXBCChecksum.h include
  )
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
-index a744375..611dd44 100644
+index a744375..f2140d7 100644
 --- a/src/graphics/command_processor.cpp
 +++ b/src/graphics/command_processor.cpp
 @@ -9,6 +9,9 @@
@@ -2898,6 +2898,22 @@ index a744375..611dd44 100644
        bool major_mode_explicit =
            xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode, vgt_draw_initiator.prim_type);
        draw_succeeded = IssueDraw(vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
+@@ -1594,11 +1729,13 @@ bool CommandProcessor::ExecutePacketType3_VIZ_QUERY(memory::RingBuffer* reader,
+     // On hardware this clears the internal state of the scan converter (which
+     // is different to the register)
+     WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, VIZQUERY_START);
+-    REXGPU_INFO("Begin viz query ID {:02X}", id);
++    // [xmd] (debug, was info: X-Men: Destiny runs dozens of queries a frame - a player's log grew by thousands
++    // of these lines a minute)
++    REXGPU_DEBUG("Begin viz query ID {:02X}", id);
+   } else {
+     // end the viz query
+     WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, VIZQUERY_END);
+-    REXGPU_INFO("End viz query ID {:02X}", id);
++    REXGPU_DEBUG("End viz query ID {:02X}", id);
+     // The scan converter writes the internal result back to the register here.
+     // We just fake it and say it was visible in case it is read back.
+     if (id < 32) {
 diff --git a/src/graphics/d3d11/command_processor.cpp b/src/graphics/d3d11/command_processor.cpp
 new file mode 100644
 index 0000000..35b78d6
